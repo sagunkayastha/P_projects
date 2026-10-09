@@ -41,7 +41,9 @@ Looks and works like Google Tasks, plus an assistant chat that also acts as a no
   time; repeat (daily / weekly on chosen days / monthly / yearly, every N); one level of subtasks;
   star; complete (collapsed "Completed" section); drag to reorder; "Starred" view.
 - **ADHD extras in v1:**
-  - Notification actions: **Done**, **Snooze 10 min**, **Snooze 1 h**, **Tomorrow 9am**.
+  - Notification actions: **Done**, **Snooze 10 min**, **Snooze 1 h** on Android (Android shows at most
+    three action buttons); the desktop notification adds **Tomorrow 9am**. On both platforms the task
+    screen has a "Snooze until tomorrow 9am" button (sets the snooze, keeps the due date).
   - **Nag:** an unhandled reminder re-alerts every 10 min, up to 3 times (setting; on by default).
   - **Quick add** from anywhere on Android: app shortcut "New task", share-to-app (shared text
     becomes a task), and a Quick Settings tile. Voice input comes from the keyboard's mic.
@@ -81,13 +83,15 @@ candidates for v1.1.
 
 | Module | Purpose |
 |---|---|
-| `shared/` | Kotlin Multiplatform (`commonMain`, `androidMain`, `jvmMain`). Data models, kotlinx.serialization DTOs, recurrence math, HLC clock, merge rules, sync client (Ktor client), SQLDelight schema for the client DB, repositories, shared Compose UI screens. |
-| `androidApp/` | Android entry point, AlarmManager scheduling, notification actions, WorkManager sync, boot receiver, share target, QS tile, shortcuts. |
-| `desktopApp/` | Desktop entry point, tray, reminder timer, `notify-send` notifier, packaging. |
+| `shared/` | Kotlin Multiplatform (`commonMain`, `androidMain`, `jvmMain`). Data models, kotlinx.serialization DTOs, recurrence math, HLC clock, merge rules, sync client (Ktor client), SQLDelight schema for the client DB, repositories. No Compose. |
+| `ui/` | Kotlin Multiplatform (android + jvm), Compose Multiplatform. The shared screens (`AppRoot`, `AppContainer`), their state holders, pairing call. Package `com.sagunkayastha.adhdhelper.ui`; depends on `shared`. Kept out of `shared` so the server never pulls in Compose. |
+| `androidApp/` | Android entry point (depends on `ui`), AlarmManager scheduling, notification actions, WorkManager sync, boot receiver, share target, QS tile, shortcuts. |
+| `desktopApp/` | Desktop entry point (depends on `ui`), tray, reminder timer, `notify-send` notifier, packaging. |
 | `server/` | Ktor server (JVM). Server DB, sync endpoints, pairing, chat runner, MCP endpoint, backups. Depends on `shared` (`jvmMain`) for models and merge rules. |
 | `docker/` | `build.Dockerfile` (JDK + Android SDK + Gradle, as in fin), `server.Dockerfile` (JRE 21 + Node + pinned `claude` CLI), `compose.yml`. |
 
-All builds and tests run inside the build container. Nothing installed on the host.
+All builds and tests run inside the build container, as the host user (`--user "$(id -u):$(id -g)"`,
+Gradle cache in the `adhd-gradle` volume) so build output is never root-owned. Nothing installed on the host.
 
 ## Data model
 
@@ -114,7 +118,11 @@ chat_message(id, role, text, created_at, status, hlc)    -- role user|assistant;
 
 ### Recurrence
 
-`repeat = {"freq":"daily|weekly|monthly|yearly","every":N,"days":["MO",...]}` (`days` weekly only).
+`repeat = {"freq":"daily|weekly|monthly|yearly","every":N,"days":["MO",...],"anchorDay":D}` (`days` weekly
+only; `anchorDay` monthly/yearly only, omitted when unset). `anchorDay` is the day of month the rule was
+created on, set from the due date when a monthly or yearly rule is saved. The next date lands on
+`anchorDay` clamped to the month's length, so a task on the 31st goes Jan 31 -> Feb 28 -> Mar 31, and a
+yearly Feb 29 task goes Feb 28 in non-leap years and back to Feb 29 in leap years.
 Completing a repeating task writes `completed_at` on the current row **and** inserts the next
 occurrence as a new task with the next due date. Recurrence math lives in `shared` and is unit-tested
 around month ends, leap years, and DST.
@@ -124,7 +132,10 @@ around month ends, leap years, and DST.
 One protocol, used by both clients; the server's assistant writes through the same merge code.
 
 - **Clock:** each device keeps a hybrid logical clock (wall time + counter + device id). Every local
-  edit stamps the row's `hlc`.
+  edit stamps the row's `hlc`. The device id is generated on the device on first run and kept in its
+  settings; pairing does not change it (the id the server returns at pairing is only the server's label
+  for that device). On a client every stamp and write goes through one lock, since the UI, notification
+  actions and background sync can write at the same moment.
 - **Merge rule:** whole-row **last-writer-wins by `hlc`**. Tombstones are rows with `deleted=1`
   and win or lose like any edit. Single user makes real conflicts rare; LWW keeps it simple and
   deterministic. (Per-field merge is a later change if lost edits ever show up.)
@@ -148,7 +159,8 @@ One protocol, used by both clients; the server's assistant writes through the sa
   each open task with `due_time` (respecting `snooze_until`) and sets one exact alarm per task
   (`AlarmManager.setExactAndAllowWhileIdle`, `USE_EXACT_ALARM` permission, fine for a sideloaded
   reminders app). Alarms are rescheduled on boot, time-zone change, and app update.
-  The alarm posts a high-priority notification on channel "Reminders" with the actions above.
+  The alarm posts a high-priority notification on channel "Reminders" with Done / Snooze 10 min /
+  Snooze 1 h. A reminder fires at `due_date + due_time`, or at `snooze_until` when that is later.
   Nag: if not acted on, it re-posts every 10 min, up to 3 times. Action handlers write through the
   repository (so they sync) and work with the app closed.
 - **Desktop:** while the app runs, a coroutine timer fires due reminders through `notify-send`
@@ -190,11 +202,13 @@ One protocol, used by both clients; the server's assistant writes through the sa
   stored in Android Keystore-backed storage / a 0600 file on desktop. All `/api/v1` calls need
   `Authorization: Bearer <token>`. Tokens can be listed and revoked (`tasks devices`,
   `tasks revoke <id>`). Tailnet membership is the outer gate; the token is the inner one.
+- **Image build:** `docker/server.Dockerfile` starts from the project's build image (`adhd-build`,
+  built from `docker/build.Dockerfile`), so the deploy builds `adhd-build` on archbox first.
 - **Container:** `tasks-server`, port `8020`, published **only** on `192.168.0.162:8020` (never
   `0.0.0.0`: the host's `tailscale0` is the employer tailnet). Joins the external `media_default` network (as `~/stacks/tmls` does) so
   `media-caddy` reaches it as `tasks-server:8020`. Volume `tasks-data:/data`. `TZ=America/Denver`.
   `restart: unless-stopped`. Lives in `~/stacks/tasks/` on archbox, built from this repo.
-- **Caddy:** add to `~/stacks/media/config/caddy/Caddyfile`:
+- **Caddy:** add to `~/stacks/media/caddy/Caddyfile` (path checked on archbox in the Phase 7 plan):
   ```
   tasks.sagunkayastha.com {
   	import cf
@@ -208,10 +222,12 @@ One protocol, used by both clients; the server's assistant writes through the sa
   user fills it from `claude setup-token`. Never committed, never logged; the chat runner passes it
   to the CLI child and nothing else.
 - **Backups:** nightly `VACUUM INTO /data/backups/tasks-YYYY-MM-DD.db`, keep 14.
-- **Health:** `GET /health` returns `{ok, rev, claude:"ok|unauthenticated|missing"}`.
+- **Health:** `GET /health` returns `{ok, rev, claude:"ok|unauthenticated|missing", apkVersion}`
+  (`apkVersion` = the published APK's integer versionCode, or null when none is published).
 - **APK distribution:** sideloaded. The server serves the latest signed APK at
   `/app/adhd-helper.apk` (token-protected), and the app shows "update available" when the server's
-  version is newer.
+  version is newer. Next to the APK, `version.txt` holds only the integer versionCode (`GET /app/version`
+  and `/health` read it on every request) and `version-name.txt` the human version name.
 - **Desktop install:** `jpackage` app image (bundled runtime) unpacked into the project's
   `dist/` folder, run from there; a `.desktop` launcher and optional autostart file are the only
   things placed outside it, and only after the user okays them (host-install rule).
