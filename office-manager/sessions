@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""The office manager's view of the running Claude Code sessions (this PC and the ssh hosts), through
+Agent Standup on 127.0.0.1:4747 (office-up starts it).
+
+    sessions                 every running session: title, machine, state, how long since it last wrote, its name for `ag`
+    sessions read NAME       the full last message of one session
+    sessions tell NAME TEXT  type TEXT into that session, as the person's own message
+
+NAME is the session title or the start of its id; case does not matter. An unclear NAME lists the matches."""
+import json
+import sys
+import urllib.parse
+import urllib.request
+
+BASE = "http://127.0.0.1:4747"
+STATE = {"working": "working", "waiting": "WAITING ON YOU", "error": "API ERROR", "idle": "idle"}
+
+
+def call(path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(BASE + path, data, {"content-type": "application/json", "x-standup": "1"})
+    try:
+        with urllib.request.urlopen(request, timeout=40) as answer:
+            return json.load(answer)
+    except urllib.error.HTTPError as error:
+        try:
+            sys.exit("failed: " + str(json.load(error).get("error")))
+        except ValueError:
+            sys.exit(f"failed: Agent Standup answered {error.code}")
+    except OSError:
+        sys.exit("Agent Standup is not answering on 127.0.0.1:4747. Start the office with: office-up")
+
+
+def running():
+    """Running sessions, newest first, without the manager's own."""
+    return [r for r in call("/api/board") if r.get("live") and not r["proj"].endswith("-office-manager")]
+
+
+def age(ms):
+    minutes = int(ms / 60000)
+    return "just now" if minutes < 1 else f"{minutes} min ago" if minutes < 90 else f"{minutes // 60} h ago"
+
+
+def target(row):
+    """What `ag send` and `ag read` take for this session: its --name, with the machine in front when it is not this PC."""
+    name = row.get("name") or "(no name)"
+    return f"{row['host']}:{name}" if row["host"] else name
+
+
+def find(name):
+    rows, wanted = running(), name.lower()
+    hits = [r for r in rows if r["title"].lower() == wanted or r["id"].startswith(wanted)]
+    hits = hits or [r for r in rows if wanted in r["title"].lower()]
+    if len(hits) == 1:
+        return hits[0]
+    listing = "\n".join(f"  {r['title']}  ({r['host'] or 'this PC'}, id {r['id'][:8]})" for r in hits or rows)
+    sys.exit((f"'{name}' fits more than one session, use the id:\n" if hits else f"no running session named '{name}'. Running:\n") + listing)
+
+
+def main(argv):
+    if not argv:
+        rows = running()
+        if not rows:
+            print("no sessions are running")
+        for r in rows:
+            print(f"{r['title']}  |  {r['host'] or 'this PC'}  |  {STATE.get(r['tab'], r['tab'])}  |  last wrote {age(r['ageMs'])}  |  id {r['id'][:8]}  |  ag {target(r)}")
+    elif argv[0] == "read" and len(argv) == 2:
+        row = find(argv[1])
+        last = call("/api/lastline?id=" + urllib.parse.quote(row["id"]))
+        print(f"{row['title']} ({row['host'] or 'this PC'}, {STATE.get(row['tab'], row['tab'])}, last wrote {age(row['ageMs'])}):\n")
+        print(last.get("raw") or "(nothing said yet)")
+    elif argv[0] == "tell" and len(argv) >= 3:
+        row = find(argv[1])
+        how = call("/api/send", {"proj": row["proj"], "id": row["id"], "text": " ".join(argv[2:])})
+        print(f"sent to {row['title']}" + ("" if how.get("typed") else " (through its inbox: it arrives marked as coming from another session)"))
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
