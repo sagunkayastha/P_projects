@@ -16,6 +16,11 @@ BASE = "http://127.0.0.1:4747"
 STATE = {"working": "working", "waiting": "WAITING ON YOU", "error": "API ERROR", "idle": "idle"}
 
 
+def state(row):
+    """working in background: the turn is over, a background agent or command it started is still running."""
+    return "working in background" if row.get("background") else STATE.get(row["tab"], row["tab"])
+
+
 def call(path, body=None):
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(BASE + path, data, {"content-type": "application/json", "x-standup": "1"})
@@ -63,11 +68,11 @@ def main(argv):
         if not rows:
             print("no sessions are running")
         for r in rows:
-            print(f"{r['title']}  |  {r['host'] or 'this PC'}  |  {STATE.get(r['tab'], r['tab'])}  |  last wrote {age(r['ageMs'])}  |  id {r['id'][:8]}  |  ag {target(r)}")
+            print(f"{r['title']}  |  {r['host'] or 'this PC'}  |  {state(r)}  |  last wrote {age(r['ageMs'])}  |  id {r['id'][:8]}  |  ag {target(r)}")
     elif argv[0] == "read" and len(argv) == 2:
         row = find(argv[1])
         last = call("/api/lastline?id=" + urllib.parse.quote(row["id"]))
-        print(f"{row['title']} ({row['host'] or 'this PC'}, {STATE.get(row['tab'], row['tab'])}, last wrote {age(row['ageMs'])}):\n")
+        print(f"{row['title']} ({row['host'] or 'this PC'}, {state(row)}, last wrote {age(row['ageMs'])}):\n")
         print(last.get("raw") or "(nothing said yet)")
     elif argv[0] == "tell" and len(argv) >= 3:
         row = find(argv[1])

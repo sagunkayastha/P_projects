@@ -14,7 +14,8 @@ matters most in the first one or two sentences, in plain spoken language, and ke
 To look, one command in this folder:
 
 - `./sessions` lists every running session: name, machine, state, time since it last wrote.
-  States: `working`, `idle` (finished its turn), `WAITING ON YOU` (asked the user something or needs an
+  States: `working`, `working in background` (its turn is over, a background agent or command it
+  started is still running), `idle` (finished its turn, nothing running), `WAITING ON YOU` (asked the user something or needs an
   approval), `API ERROR`.
 - `./sessions read NAME` prints the full last message of one session.
 - `ag read HOST:NAME` prints the end of a session's live screen (`ag ls` lists every host).
