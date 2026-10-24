@@ -279,7 +279,8 @@ def record_variation(rd, item):
 
 # ---------- Frames (one standalone picture per script line; no page layout yet) ----------
 FRAME_SHAPES = {"wide": (1344, 768), "square": (1024, 1024), "tall": (832, 1216), "strip": (1536, 640)}
-FRAME_METHODS = {"anima": "Anima (character tags)", "klein9": "klein 9B + saved character pictures"}
+FRAME_METHODS = {"anima": "Anima (character tags)", "klein9": "klein 9B + saved character pictures",
+                 "restyle": "Anima redraw of a picture (img2img)"}
 
 
 def _frames_file(project):
@@ -300,13 +301,14 @@ def frames_put(project, data):
     f = _frames_file(project)
     lines = []
     for ln in data.get("lines", [])[:40]:
-        lines.append({k: ln.get(k) for k in ("text", "shape", "prompt", "method", "chars", "chosen", "chosen_meta")})
+        lines.append({k: ln[k] for k in ("text", "shape", "prompt", "method", "chars", "chosen", "chosen_meta",
+                                          "variants", "final") if ln.get(k) is not None})
     out = {"project": project, "lines": lines, "updated": time.strftime("%Y-%m-%d %H:%M:%S")}
     f.write_text(json.dumps(out, indent=2))
     return out
 
 
-def frame_pick(project, line, jid):
+def frame_pick(project, line, jid, slot=""):
     job = get(jid)
     if not job or job["status"] != "done":
         raise ValueError("not finished")
@@ -314,14 +316,21 @@ def frame_pick(project, line, jid):
     if not 0 <= line < len(data["lines"]):
         raise ValueError("no such line")
     d = _frames_file(project).parent
-    name = f"line-{line + 1:02d}.png"
+    name = f"line-{line + 1:02d}{'-' + slot if slot else ''}.png"
     if (d / name).exists():  # never overwrite an earlier pick: keep it under a numbered name
         n = 2
         while (d / f"line-{line + 1:02d}-v{n}.png").exists():
             n += 1
-        name = f"line-{line + 1:02d}-v{n}.png"
+        name = f"line-{line + 1:02d}{'-' + slot if slot else ''}-v{n}.png"
     shutil.copyfile(resolve(job["filename"]), d / name)
     params = json.loads(job["params"])
+    meta = {"prompt": job["prompt"], "seed": params.get("seed"), "method": params.get("method"),
+            "denoise": params.get("denoise"), "src": params.get("src"), "job": jid}
+    if slot:  # a comparison variant (e.g. A = Anima restyle); the chosen frame stays as it is
+        if not data["lines"][line].get("variants"):
+            data["lines"][line]["variants"] = {}
+        data["lines"][line]["variants"][slot] = {"ref": f"manga/frames/{project}/{name}", **meta}
+        return frames_put(project, data)
     data["lines"][line]["chosen"] = f"manga/frames/{project}/{name}"
     data["lines"][line]["chosen_meta"] = {"prompt": job["prompt"], "seed": params.get("seed"),
                                           "method": params.get("method"), "shape": params.get("shape"),

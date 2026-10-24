@@ -8,10 +8,20 @@
   html, body { margin: 0; background: #111; color: #eee; }
   body { font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   main { max-width: 900px; margin: 0 auto; padding: 16px 16px 40px; }
+  video { display: block; width: 100%; max-width: 420px; margin: 0 auto 34px; border-radius: 8px; background: #000; }
   figure { margin: 0 0 34px; }
   img { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
   figcaption { margin-top: 10px; text-align: center; font-size: 18px; }
   figcaption b { font-weight: 600; }
+  h2 { font-size: 16px; font-weight: 600; margin: 40px 0 6px; color: #bbb; }
+  .note { color: #999; font-size: 14px; margin: 0 0 18px; }
+  .cmp { margin: 0 0 28px; }
+  .cmp .t { font-size: 15px; margin-bottom: 8px; }
+  .row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; align-items: start; }
+  .row div { font-size: 12px; color: #aaa; text-align: center; }
+  .row div img { margin-bottom: 4px; }
+  .row .win { color: #8fd18f; }
+  @media (max-width: 600px) { .row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .empty { color: #888; text-align: center; margin-top: 30vh; }
 </style>
 </head>
@@ -19,22 +29,41 @@
 <main id="m"></main>
 <script>
 const project = new URLSearchParams(location.search).get("p") || "deadlock-demo";
+const url = (ref) => "/api/studio/file/" + ref.split("/").map(encodeURIComponent).join("/");
+const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+function caption(text) {
+  const c = el("figcaption");
+  const i = (text || "").indexOf(":");
+  if (i > 0) { c.appendChild(el("b", null, text.slice(0, i + 1))); c.appendChild(document.createTextNode(" " + text.slice(i + 1).trim())); }
+  else c.textContent = text || "";
+  return c;
+}
 fetch(`/api/frames/${encodeURIComponent(project)}`).then((r) => r.json()).then((d) => {
   const m = document.getElementById("m");
-  const lines = (d.lines || []).filter((l) => l.chosen);
+  const lines = (d.lines || []).filter((l) => l.final || l.chosen);
   if (!lines.length) { m.innerHTML = '<p class="empty">No frames picked yet.</p>'; return; }
+  if (d.video) {
+    const v = el("video"); v.src = url(d.video); v.controls = true; v.playsInline = true; v.preload = "metadata";
+    m.appendChild(v);
+  }
   for (const l of lines) {
-    const f = document.createElement("figure");
-    const img = document.createElement("img");
-    img.src = "/api/studio/file/" + l.chosen.split("/").map(encodeURIComponent).join("/");
-    img.alt = l.text || "";
-    const c = document.createElement("figcaption");
-    const i = (l.text || "").indexOf(":");
-    if (i > 0) {
-      const b = document.createElement("b"); b.textContent = l.text.slice(0, i + 1);
-      c.appendChild(b); c.appendChild(document.createTextNode(" " + l.text.slice(i + 1).trim()));
-    } else c.textContent = l.text || "";
-    f.appendChild(img); f.appendChild(c); m.appendChild(f);
+    const f = el("figure"); const img = el("img"); img.src = url(l.final || l.chosen); img.alt = l.text || "";
+    f.appendChild(img); f.appendChild(caption(l.text)); m.appendChild(f);
+  }
+  if (!lines.some((l) => l.variants)) return;
+  m.appendChild(el("h2", null, "Style comparison"));
+  m.appendChild(el("p", "note", "klein = first pick · A = Anima redraw (img2img 0.38) · B = A + MangaScreen finish · " +
+    "C = klein with a strong ink prompt · D = klein + MangaScreen Manga-Lite · E = klein + MangaScreen finish " +
+    "without the Levels step (used above: keeps Haze's dark skin as a tone). Line 1 B-E start from a re-drawn klein frame (ink street)."));
+  for (const l of lines) {
+    const box = el("div", "cmp"); box.appendChild(el("div", "t", l.text || ""));
+    const row = el("div", "row");
+    const cells = [["klein", l.chosen], ...Object.entries(l.variants || {}).map(([k, v]) => [k.toUpperCase(), v.ref])];
+    for (const [k, ref] of cells) {
+      const c = el("div", ref === l.final ? "win" : ""); const img = el("img"); img.src = url(ref); img.loading = "lazy";
+      c.appendChild(img); c.appendChild(document.createTextNode(k + (ref === l.final ? " ✓" : ""))); row.appendChild(c);
+    }
+    box.appendChild(row); m.appendChild(box);
   }
 });
 </script>

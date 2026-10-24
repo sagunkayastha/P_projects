@@ -224,6 +224,10 @@ def _studio_workflow(job, params, prefix):
         if params["model"] == "qwen2511":
             return "qwen2511", workflows.qwen2511_edit(job["prompt"], src, w, h, params["seed"], prefix)
     if kind == "frame":
+        if params["method"] == "restyle":  # Anima img2img over a finished frame: keeps layout, gets Anima's ink look
+            src = studio.stage(params["src"])
+            wf = workflows.anima_i2i(job["prompt"], src, w, h, params["seed"], prefix, params["denoise"])
+            return "anima", workflows.bw_finish(wf, ["9", 0], w, h, prefix)
         if params["method"] == "klein9":
             refs = [studio.stage(f"manga/characters/{c}/character.png") for c in params["chars"]]
             wf = workflows.klein9_refs(job["prompt"], refs, w, h, params["seed"], prefix)
@@ -417,7 +421,9 @@ def frames_get(project: str):
         data = studio.frames_get(project)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {**data, "shapes": studio.FRAME_SHAPES, "methods": studio.FRAME_METHODS}
+    video = studio.MANGA / "frames" / project / "video.mp4"
+    return {**data, "shapes": studio.FRAME_SHAPES, "methods": studio.FRAME_METHODS,
+            "video": f"manga/frames/{project}/video.mp4" if video.is_file() else None}
 
 
 @app.post("/api/frames/{project}")
@@ -447,10 +453,34 @@ def frames_make(project: str, line: int, prompt: str = Form(...), shape: str = F
     return {"batch": batch}
 
 
-@app.post("/api/frames/{project}/{line}/pick")
-def frames_pick(project: str, line: int, job: int = Form(...)):
+@app.post("/api/frames/{project}/{line}/restyle")
+def frames_restyle(project: str, line: int, src: str = Form(...), prompt: str = Form(...),
+                   denoise: float = Form(0.4), count: int = Form(2)):
     try:
-        return studio.frame_pick(project, line, job)
+        p = studio.resolve(src)
+    except FileNotFoundError:
+        raise HTTPException(404, "no such picture")
+    w, h = _png_size(p)
+    batch = studio.new_batch()
+    for _ in range(max(1, min(count, 8))):
+        _queue(batch, "frame", prompt.strip(), {"seed": _seed(), "width": w, "height": h, "method": "restyle",
+                                                "src": src, "denoise": max(0.1, min(0.9, denoise)), "chars": [],
+                                                "project": project, "line": line})
+    return {"batch": batch}
+
+
+def _png_size(p):
+    with open(p, "rb") as f:
+        head = f.read(24)
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+@app.post("/api/frames/{project}/{line}/pick")
+def frames_pick(project: str, line: int, job: int = Form(...), slot: str = Form("")):
+    if slot and not studio.NAME_RE.match(slot):
+        raise HTTPException(400, "bad slot")
+    try:
+        return studio.frame_pick(project, line, job, slot)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
