@@ -13,14 +13,19 @@
   img { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
   figcaption { margin-top: 10px; text-align: center; font-size: 18px; }
   figcaption b { font-weight: 600; }
-  h2 { font-size: 16px; font-weight: 600; margin: 40px 0 6px; color: #bbb; }
+  figcaption.silent { color: #888; font-size: 14px; font-style: italic; }
+  h1 { font-size: 18px; font-weight: 600; margin: 8px 0 18px; }
+  h2 { font-size: 16px; font-weight: 600; margin: 48px 0 6px; color: #bbb; border-top: 1px solid #333; padding-top: 22px; }
   .note { color: #999; font-size: 14px; margin: 0 0 18px; }
   .cmp { margin: 0 0 28px; }
   .cmp .t { font-size: 15px; margin-bottom: 8px; }
-  .row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: start; }
+  .row { display: grid; grid-template-columns: repeat(var(--n, 7), minmax(0, 1fr)); gap: 8px; align-items: start; }
   .row div { font-size: 12px; color: #aaa; text-align: center; }
   .row div img { margin-bottom: 4px; }
   .row .win { color: #8fd18f; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 22px; }
+  .pair div { font-size: 13px; color: #aaa; text-align: center; }
+  .pair img { margin-bottom: 6px; }
   @media (max-width: 600px) { .row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .empty { color: #888; text-align: center; margin-top: 30vh; }
 </style>
@@ -28,45 +33,66 @@
 <body>
 <main id="m"></main>
 <script>
-const project = new URLSearchParams(location.search).get("p") || "deadlock-demo";
+const m = document.getElementById("m");
 const url = (ref) => "/api/studio/file/" + ref.split("/").map(encodeURIComponent).join("/");
 const el = (t, c, txt) => { const e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; };
+const get = (p) => fetch(`/api/frames/${encodeURIComponent(p)}`).then((r) => r.json());
 function caption(text) {
-  const c = el("figcaption");
+  if (/^\d+ ·/.test(text || "")) return el("figcaption", "silent", text.replace(/^\d+ · /, ""));
   const i = (text || "").indexOf(":");
+  const c = el("figcaption");
   if (i > 0) { c.appendChild(el("b", null, text.slice(0, i + 1))); c.appendChild(document.createTextNode(" " + text.slice(i + 1).trim())); }
   else c.textContent = text || "";
   return c;
 }
-fetch(`/api/frames/${encodeURIComponent(project)}`).then((r) => r.json()).then((d) => {
-  const m = document.getElementById("m");
-  const lines = (d.lines || []).filter((l) => l.final || l.chosen);
-  if (!lines.length) { m.innerHTML = '<p class="empty">No frames picked yet.</p>'; return; }
+function frames(d) {
   if (d.video) {
-    const v = el("video"); v.src = url(d.video); v.controls = true; v.playsInline = true; v.preload = "metadata";
-    m.appendChild(v);
+    const v = el("video"); v.src = url(d.video); v.controls = true; v.playsInline = true; v.preload = "metadata"; m.appendChild(v);
   }
-  for (const l of lines) {
-    const f = el("figure"); const img = el("img"); img.src = url(l.final || l.chosen); img.alt = l.text || "";
+  for (const l of (d.lines || []).filter((l) => l.final || l.chosen)) {
+    const f = el("figure"); const img = el("img"); img.src = url(l.final || l.chosen); img.alt = l.text || ""; img.loading = "lazy";
     f.appendChild(img); f.appendChild(caption(l.text)); m.appendChild(f);
   }
-  if (!lines.some((l) => l.variants)) return;
-  m.appendChild(el("h2", null, "Style comparison"));
-  m.appendChild(el("p", "note", "klein = first pick · A = Anima redraw (img2img 0.38) · B = A + MangaScreen finish · " +
-    "C = klein with a strong ink prompt · D = klein + MangaScreen Manga-Lite · E = klein + MangaScreen finish (old pick) · " +
-    "F = NEW, used above: Anima Manga draws the frame itself; the klein frame only steers the layout (ControlNet-LLLite) " +
-    "and the saved Haze picture steers her look (IP-Adapter)."));
-  for (const l of lines) {
+}
+function compareRows(d) {
+  for (const l of (d.lines || []).filter((l) => l.variants)) {
     const box = el("div", "cmp"); box.appendChild(el("div", "t", l.text || ""));
     const row = el("div", "row");
-    const cells = [["klein", l.chosen], ...Object.entries(l.variants || {}).map(([k, v]) => [k.toUpperCase(), v.ref])];
+    const cells = [["klein", l.chosen], ...Object.entries(l.variants).map(([k, v]) => [k.toUpperCase(), v.ref])].filter((c) => c[1]);
+    row.style.setProperty("--n", cells.length);
     for (const [k, ref] of cells) {
       const c = el("div", ref === l.final ? "win" : ""); const img = el("img"); img.src = url(ref); img.loading = "lazy";
       c.appendChild(img); c.appendChild(document.createTextNode(k + (ref === l.final ? " ✓" : ""))); row.appendChild(c);
     }
     box.appendChild(row); m.appendChild(box);
   }
-});
+}
+const single = new URLSearchParams(location.search).get("p");
+(async () => {
+  if (single) { const d = await get(single); frames(d); compareRows(d); return; }
+  m.appendChild(el("h1", null, "Not Your Mom · 12 frames (Gemini shot list)"));
+  frames(await get("deadlock-12"));
+  const refs = await get("refs");
+  if ((refs.lines || []).some((l) => l.variants)) {
+    m.appendChild(el("h2", null, "Character references: old vs new"));
+    m.appendChild(el("p", "note", "Left: old smooth references. Right: new pen-and-ink references (used for the 12 frames)."));
+    for (const l of refs.lines) {
+      if (!l.variants) continue;
+      const p = el("div", "pair");
+      for (const k of ["old", "new"]) {
+        const c = el("div"); const img = el("img"); img.src = url(l.variants[k].ref); img.loading = "lazy";
+        c.appendChild(img); c.appendChild(document.createTextNode(l.variants[k].label)); p.appendChild(c);
+      }
+      m.appendChild(p);
+    }
+  }
+  m.appendChild(el("h2", null, "Earlier 4 frames"));
+  const old = await get("deadlock-demo");
+  frames(old);
+  m.appendChild(el("p", "note", "Style tests per line: klein = first pick · A = Anima redraw · B = A + MangaScreen · " +
+    "C = klein, strong ink prompt · D = klein + Manga-Lite · E = klein + MangaScreen finish · F = Anima draws with layout control (used above)."));
+  compareRows(old);
+})();
 </script>
 </body>
 </html>

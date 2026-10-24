@@ -5,6 +5,7 @@ FastAPI app; talks to the ComfyUI container in this folder (service `comfyui`, :
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -233,7 +234,8 @@ def _studio_workflow(job, params, prefix):
             ref = studio.stage(params["ref"]) if params.get("ref") else None
             return "anima", workflows.anima_control(job["prompt"], ctrl, w, h, params["seed"], prefix,
                                                     params["ctrl_strength"], params["ctrl_end"], ref,
-                                                    params["ip_strength"])
+                                                    params["ip_strength"], params.get("loras"),
+                                                    params.get("neg_extra", ""))
         if params["method"] == "klein9":
             refs = [studio.stage(f"manga/characters/{c}/character.png") for c in params["chars"]]
             wf = workflows.klein9_refs(job["prompt"], refs, w, h, params["seed"], prefix)
@@ -478,20 +480,29 @@ def frames_restyle(project: str, line: int, src: str = Form(...), prompt: str = 
 @app.post("/api/frames/{project}/{line}/control")
 def frames_control(project: str, line: int, src: str = Form(...), prompt: str = Form(...), ref: str = Form(""),
                    ctrl_strength: float = Form(1.0), ctrl_end: float = Form(0.6), ip_strength: float = Form(0.7),
-                   count: int = Form(2), seed: int = Form(0)):
+                   count: int = Form(2), seed: int = Form(0), loras: str = Form(""), shape: str = Form(""),
+                   neg_extra: str = Form("")):
+    # loras: "file.safetensors:0.8,other.safetensors:0.5" (files in models/loras)
+    lora_list = []
+    for part in [x for x in loras.split(",") if x.strip()]:
+        name, _, st = part.strip().rpartition(":")
+        if not re.fullmatch(r"[\w.-]+\.safetensors", name):
+            raise HTTPException(400, f"bad lora: {part}")
+        lora_list.append((name, float(st)))
     for r in [src] + ([ref] if ref else []):
         try:
             studio.resolve(r)
         except FileNotFoundError:
             raise HTTPException(404, f"no such picture: {r}")
-    w, h = _png_size(studio.resolve(src))
+    w, h = studio.FRAME_SHAPES[shape] if shape in studio.FRAME_SHAPES else _png_size(studio.resolve(src))
     w, h = w // 16 * 16, h // 16 * 16
     batch = studio.new_batch()
     for i in range(max(1, min(count, 8))):
         _queue(batch, "frame", prompt.strip(), {"seed": (seed + i) if seed else _seed(), "width": w, "height": h,
                                                 "method": "control", "src": src, "ref": ref,
                                                 "ctrl_strength": ctrl_strength, "ctrl_end": ctrl_end,
-                                                "ip_strength": ip_strength, "chars": [], "project": project,
+                                                "ip_strength": ip_strength, "loras": lora_list, "neg_extra": neg_extra[:400], "chars": [],
+                                                "project": project,
                                                 "line": line})
     return {"batch": batch}
 

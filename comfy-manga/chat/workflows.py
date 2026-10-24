@@ -123,18 +123,31 @@ def klein9_refs(prompt, images, w, h, seed, prefix):
     return wf
 
 
-def anima_control(prompt, control, w, h, seed, prefix, ctrl_strength=1.0, ctrl_end=0.6, ref=None, ip_strength=0.7):
+def with_loras(wf, loras, base=("1", 0)):
+    """Chain LoraLoaderModelOnly after the UNet; returns the model output ref. loras = [(file, strength), ...]."""
+    ref = list(base)
+    for i, (name, st) in enumerate(loras or []):
+        n = str(80 + i)
+        wf[n] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ref, "lora_name": name, "strength_model": st}}
+        ref = [n, 0]
+    return ref
+
+
+def anima_control(prompt, control, w, h, seed, prefix, ctrl_strength=1.0, ctrl_end=0.6, ref=None, ip_strength=0.7,
+                  loras=None, neg_extra=""):
     """Anima draws the frame itself (real manga linework); a finished picture (e.g. a klein frame) steers the
     layout through kohya's ControlNet-LLLite 'any-test like v2' (greyscale/lineart control), and a saved
     character picture steers identity through the Anima IP-Adapter (SigLIP2). Nodes pinned in comfyui/Dockerfile."""
-    wf = anima(prompt, w, h, seed, prefix, NEG_BW)
-    wf["30"] = {"class_type": "LoadImage", "inputs": {"image": control}}
-    wf["31"] = {"class_type": "ImageScale", "inputs": {"image": ["30", 0], "upscale_method": "lanczos",
-                "width": w, "height": h, "crop": "center"}}
-    wf["32"] = {"class_type": "AnimaLLLiteApply_sdscripts", "inputs": {
-        "model": ["1", 0], "lllite_name": "anima-lllite-any-test-like-v2.safetensors", "image": ["31", 0],
-        "strength": ctrl_strength, "start_percent": 0.0, "end_percent": ctrl_end, "preserve_wrapper": True}}
-    model = ["32", 0]
+    wf = anima(prompt, w, h, seed, prefix, NEG_BW + (", " + neg_extra if neg_extra else ""))
+    model = with_loras(wf, loras)
+    if control and ctrl_strength > 0:
+        wf["30"] = {"class_type": "LoadImage", "inputs": {"image": control}}
+        wf["31"] = {"class_type": "ImageScale", "inputs": {"image": ["30", 0], "upscale_method": "lanczos",
+                    "width": w, "height": h, "crop": "center"}}
+        wf["32"] = {"class_type": "AnimaLLLiteApply_sdscripts", "inputs": {
+            "model": model, "lllite_name": "anima-lllite-any-test-like-v2.safetensors", "image": ["31", 0],
+            "strength": ctrl_strength, "start_percent": 0.0, "end_percent": ctrl_end, "preserve_wrapper": True}}
+        model = ["32", 0]
     if ref and ip_strength > 0:
         wf["33"] = {"class_type": "LoadImage", "inputs": {"image": ref}}
         wf["34"] = {"class_type": "AnimaIPAdapterLoader", "inputs": {

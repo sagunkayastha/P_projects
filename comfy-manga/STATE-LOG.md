@@ -1,5 +1,12 @@
 # comfy-manga — STATE-LOG (newest first)
 
+## 2026-10-24 03:55 — 12 frames, ink refs, parked (rem-manga)
+- Ink references via Civitai LoRAs Mangalike_Anima + Pearly Cross-hatching (user key) -> haze-ink, rem-ink.
+- Gemini 12-shot list drawn: klein layouts (two-character wide shots dropped Rem until reworded) -> Anima + LLLite
+  + LoRAs (+ IP-Adapter for Haze). 36 candidates + 6 redos; critic by me and Gemini (busty Haze, weak angles).
+- New shapes: tall916, hstrip, vstrip; control endpoint takes loras, neg_extra, shape. /demo reworked.
+- User: still not manga. Project parked for research.
+
 ## 2026-10-24 03:20 — Anima-drawn frames (rem-manga)
 - Read + pinned 3 nodes (LLLite, IP-Adapter, Cosmos-Reference) into local/comfyui-manga:cu130; weights ~2 GB.
 - Tests (same seed): IP-Adapter fixes Haze (hair/mask) but breaks Rem; control 1.0/end 0.6 keeps layout with Anima linework.

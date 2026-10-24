@@ -278,7 +278,8 @@ def record_variation(rd, item):
 
 
 # ---------- Frames (one standalone picture per script line; no page layout yet) ----------
-FRAME_SHAPES = {"wide": (1344, 768), "square": (1024, 1024), "tall": (832, 1216), "strip": (1536, 640)}
+FRAME_SHAPES = {"wide": (1344, 768), "square": (1024, 1024), "tall": (832, 1216), "strip": (1536, 640),
+                "tall916": (768, 1344), "hstrip": (1536, 512), "vstrip": (512, 1536)}
 FRAME_METHODS = {"anima": "Anima (character tags)", "klein9": "klein 9B + saved character pictures",
                  "restyle": "Anima redraw of a picture (img2img)",
                  "control": "Anima draws; picture = layout control, character = IP-Adapter"}
