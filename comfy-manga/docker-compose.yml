@@ -1,0 +1,70 @@
+name: comfy-manga
+
+# Small, self-contained setup: ComfyUI with one model (Anima Manga) + a one-page app.
+# Ports: ComfyUI :8288 (localhost only), app :8289 (localhost + home LAN).
+services:
+  comfyui:
+    image: local/comfyui:cu130
+    container_name: comfyui-manga
+    ports:
+      - "127.0.0.1:8288:8188"
+    volumes:
+      - ./models:/app/ComfyUI/models
+      - ./output:/app/ComfyUI/output
+      - ./input:/app/ComfyUI/input
+      - manga_out:/app/ComfyUI/output/manga   # RAM-backed results, shared with the app
+      - manga_in:/app/ComfyUI/input/studio     # RAM: pictures the studio hands to ComfyUI (img2img, masks, edits)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    command: python main.py --listen 0.0.0.0 --port 8188 --disable-metadata --reserve-vram 0.5
+    logging: {driver: none}
+    restart: "no"
+
+  app:
+    build: ./chat
+    image: local/comfymanga:latest
+    container_name: manga-app
+    user: "1000:1000"   # files written to ~/Documents/Personal/manga belong to the user
+    ports:
+      - "127.0.0.1:8289:8189"
+      - "192.168.0.235:8289:8189"   # home LAN (phone); no auth, home Wi-Fi only
+    environment:
+      - COMFY_URL=http://comfyui-manga:8188
+      - OUTPUT_DIR=/data/output
+      - CHAT_SUBDIR=manga
+      - MANGA_DIR=/data/manga
+      - INPUT_DIR=/data/input
+      - MODELS_DIR=/models
+      - TZ=America/Denver
+    volumes:
+      - ./output:/data/output
+      - manga_out:/data/output/manga   # results stay in RAM until saved/downloaded
+      - manga_in:/data/input
+      - ${HOME}/Documents/Personal/manga:/data/manga   # character studio: kept pictures, characters (mode 700)
+      - ./models:/models:ro                            # only to check which edit models are downloaded
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [utility]   # nvidia-smi for the GPU line only
+    tmpfs:
+      - /data:size=64m,mode=0700,uid=1000,gid=1000     # app history (SQLite) in RAM
+    logging: {driver: none}
+    depends_on:
+      - comfyui
+    restart: "no"
+
+volumes:
+  manga_out:
+    driver: local
+    driver_opts: {type: tmpfs, device: tmpfs, o: "size=4g,uid=1000,gid=1000,mode=0700"}
+  manga_in:
+    driver: local
+    driver_opts: {type: tmpfs, device: tmpfs, o: "size=1g,uid=1000,gid=1000,mode=0700"}

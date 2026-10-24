@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Manga Demo</title>
+<style>
+  html, body { margin: 0; background: #111; color: #eee; }
+  body { font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 16px 16px 40px; }
+  figure { margin: 0 0 34px; }
+  img { display: block; width: 100%; height: auto; border-radius: 6px; background: #fff; }
+  figcaption { margin-top: 10px; text-align: center; font-size: 18px; }
+  figcaption b { font-weight: 600; }
+  .empty { color: #888; text-align: center; margin-top: 30vh; }
+</style>
+</head>
+<body>
+<main id="m"></main>
+<script>
+const project = new URLSearchParams(location.search).get("p") || "deadlock-demo";
+fetch(`/api/frames/${encodeURIComponent(project)}`).then((r) => r.json()).then((d) => {
+  const m = document.getElementById("m");
+  const lines = (d.lines || []).filter((l) => l.chosen);
+  if (!lines.length) { m.innerHTML = '<p class="empty">No frames picked yet.</p>'; return; }
+  for (const l of lines) {
+    const f = document.createElement("figure");
+    const img = document.createElement("img");
+    img.src = "/api/studio/file/" + l.chosen.split("/").map(encodeURIComponent).join("/");
+    img.alt = l.text || "";
+    const c = document.createElement("figcaption");
+    const i = (l.text || "").indexOf(":");
+    if (i > 0) {
+      const b = document.createElement("b"); b.textContent = l.text.slice(0, i + 1);
+      c.appendChild(b); c.appendChild(document.createTextNode(" " + l.text.slice(i + 1).trim()));
+    } else c.textContent = l.text || "";
+    f.appendChild(img); f.appendChild(c); m.appendChild(f);
+  }
+});
+</script>
+</body>
+</html>

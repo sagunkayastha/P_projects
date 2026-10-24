@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Manga Studio</title>
+<link rel="stylesheet" href="/static/style.css?v=1">
+<link rel="stylesheet" href="/static/studio.css?v=1">
+</head>
+<body>
+<header>
+  <span class="brand">Manga Studio</span>
+  <nav class="nav"><a href="/" class="on">Pictures</a><a href="/studio">Character</a></nav>
+</header>
+
+<main id="feed"></main>
+
+<footer>
+  <div id="estline" class="estline"></div>
+  <div id="gpu" class="gpu">GPU …</div>
+  <div class="chips" id="shape">
+    <button data-v="wide">wide</button>
+    <button data-v="square">square</button>
+    <button data-v="tall">tall</button>
+  </div>
+  <div class="composer">
+    <textarea id="prompt" rows="1" placeholder="a manga panel of…"></textarea>
+    <button id="send" class="icon send" title="generate">➤</button>
+  </div>
+</footer>
+
+<div id="lightbox" class="lightbox" hidden>
+  <img id="lightbox-img" alt="">
+  <button id="lightbox-close" title="close" aria-label="close">×</button>
+</div>
+
+<script src="/static/app.js?v=1"></script>
+</body>
+</html>

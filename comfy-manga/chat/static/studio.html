@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Character Studio</title>
+<link rel="stylesheet" href="/static/style.css?v=3">
+<link rel="stylesheet" href="/static/studio.css?v=3">
+</head>
+<body class="studio">
+<header>
+  <span class="brand">Character Studio</span>
+  <nav class="nav"><a href="/">Pictures</a><a href="/studio" class="on">Character</a></nav>
+</header>
+
+<main id="studio">
+  <section class="card">
+    <h2>1 · Character prompt</h2>
+    <div class="chips presets" id="presets"></div>
+    <textarea id="cprompt" rows="4"></textarea>
+    <div class="row">
+      <button id="gen" class="btn primary">Make 16</button>
+      <span id="genhint" class="muted small">Anima Manga · 896x1152 · random seeds · ~16 s each</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2 · Results <span class="muted small">tap a picture to keep it</span></h2>
+    <div id="batches"></div>
+  </section>
+
+  <section class="card">
+    <h2>3 · Kept <span class="muted small">tap one to work on it</span></h2>
+    <div id="kept" class="strip"></div>
+  </section>
+
+  <section class="card" id="work" hidden>
+    <h2>4 · Work on this one</h2>
+    <div class="workgrid">
+      <div class="stage" id="stage">
+        <img id="wimg" alt="">
+        <canvas id="wmask" width="896" height="1152"></canvas>
+      </div>
+      <div class="tools">
+        <div class="tabs" id="tabs">
+          <button data-t="more" class="on">More like this</button>
+          <button data-t="paint">Inpaint</button>
+          <button data-t="save">Save</button>
+        </div>
+        <div class="pane" data-p="more">
+          <label class="field">Prompt <textarea id="mprompt" rows="3"></textarea></label>
+          <label class="field">Change amount <b id="dval">0.40</b>
+            <input id="denoise" type="range" min="0.30" max="0.55" step="0.01" value="0.40"></label>
+          <div class="muted small">0.30 = almost the same · 0.55 = new pose, same look</div>
+          <div class="row"><button id="more" class="btn primary">Make 4 variations</button></div>
+        </div>
+        <div class="pane" data-p="paint" hidden>
+          <div class="muted small">Paint over the area to redo (face, eyes) on the picture.</div>
+          <div class="row">
+            <label class="field inline">Brush <input id="brush" type="range" min="8" max="90" value="36"></label>
+            <button id="erase" class="btn">Eraser</button>
+            <button id="clearm" class="btn">Clear</button>
+          </div>
+          <label class="field">Prompt for the area <textarea id="iprompt" rows="3"></textarea></label>
+          <label class="field">Strength <b id="ival">0.60</b>
+            <input id="idenoise" type="range" min="0.30" max="0.90" step="0.01" value="0.60"></label>
+          <div class="row"><button id="inpaint" class="btn primary">Redo painted area (2)</button></div>
+        </div>
+        <div class="pane" data-p="save" hidden>
+          <label class="field">Name <input id="cname" value="" autocapitalize="off" autocomplete="off"></label>
+          <label class="field">Traits to keep (plain words, used by the edit model)
+            <textarea id="ctraits" rows="3"></textarea></label>
+          <div class="muted small">Saves the picture + seed + prompt + settings to
+            ~/Documents/Personal/manga/characters/&lt;name&gt;/</div>
+          <div class="row"><button id="save" class="btn primary">Save as character</button></div>
+        </div>
+        <div id="wmeta" class="muted small wmeta"></div>
+        <div class="row"><button id="unkeep" class="btn small">Remove from kept</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>5 · Characters</h2>
+    <div id="chars"></div>
+  </section>
+  <section class="card">
+    <h2>6 · Frames <span class="muted small">one picture per script line · tap a picture to pick it</span></h2>
+    <div class="row frames-top">
+      <label class="field inline">Project <input id="fproject" value="deadlock-demo" autocapitalize="off"></label>
+      <button id="faddline" class="btn small">Add line</button>
+    </div>
+    <div id="frames"></div>
+  </section>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<div id="lightbox" class="lightbox" hidden>
+  <img id="lightbox-img" alt="">
+  <button id="lightbox-close" title="close" aria-label="close">×</button>
+</div>
+<script src="/static/studio.js?v=3"></script>
+</body>
+</html>
