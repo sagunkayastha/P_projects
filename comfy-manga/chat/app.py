@@ -18,6 +18,8 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import db
+import director
+import gpu as gpuhelper
 import graphs
 import layout
 import media
@@ -52,6 +54,7 @@ def _import_dirs():
 @asynccontextmanager
 async def lifespan(app):
     db.init()
+    director.init()
     worker.start()
     threading.Thread(target=_import_dirs, daemon=True).start()
     yield
@@ -409,7 +412,7 @@ def retry_character(cid: int):
 
 # ---------- pages ----------
 def _page_view(pg):
-    out = {k: pg[k] for k in ("id", "ts", "chars", "lines", "image_id", "status", "error", "writer")}
+    out = {k: pg.get(k) for k in ("id", "ts", "chars", "lines", "image_id", "status", "error", "writer", "bible")}
     out["panels"] = [{**p, "job": _job_view(p.get("job_id")), "versions": worker.versions(p)} for p in pg["panels"]]
     return out
 
@@ -441,18 +444,19 @@ def _panel_job(pid, idx, panel, chars):
 
 @app.post("/api/pages")
 def make_page(body: dict = Body(...)):
-    lines = [str(x).strip()[:400] for x in (body.get("lines") or [])]
+    lines = [str(x).strip()[:1200] for x in (body.get("lines") or [])]
     if len(lines) != 4 or not all(lines):
         raise HTTPException(400, "write one line for each of the 4 panels")
     chars = _ready_chars(body.get("chars"))
-    prompts, quotes, casts, who, fixed = writer.write(lines, _wchars(chars))
+    bible = str(body.get("bible") or "").strip()[:1500]
+    prompts, quotes, casts, who, fixed = writer.write(lines, _wchars(chars), bible)
     panels = [{"line": lines[i], "prompt": prompts[i], "quotes": quotes[i], "cast": casts[i]} for i in range(4)]
     for i in range(4):
         if fixed[i]:  # spelling fixed by the local LLM writer: used, and the user sees what it was
             panels[i]["fixed"] = lines[i]
             panels[i]["line"] = lines[i] = fixed[i]
     pid = db.insert("pages", chars=[c["slug"] for c in chars], lines=lines, panels=panels, status="working",
-                    writer=who)
+                    writer=who, bible=bible)
     for i in range(4):
         panels[i]["job_id"] = _panel_job(pid, i, panels[i], chars)
     db.update("pages", pid, panels=panels)
@@ -484,7 +488,7 @@ def redo_panel(pid: int, idx: int, body: dict = Body(default={})):
     line = body.get("line")
     cast = body.get("cast")
     if line is not None:
-        line = str(line).strip()[:400]
+        line = str(line).strip()[:1200]
         if not line:
             raise HTTPException(400, "write what happens in this panel")
     if cast is not None:
@@ -495,7 +499,7 @@ def redo_panel(pid: int, idx: int, body: dict = Body(default={})):
         new_line = line if line is not None else pn["line"]
         if cast is None and line is not None:
             cast = pn.get("cast")  # keep the user's earlier choice of characters
-        prompt, quotes, cast = writer.panel(new_line, _wchars(chars), idx, cast)
+        prompt, quotes, cast = writer.panel(new_line, _wchars(chars), idx, cast, pg.get("bible") or "")
         pn.update(line=new_line, prompt=prompt, quotes=quotes, cast=cast, fixed=None, warn=None)
         lines = pg["lines"]
         lines[idx] = new_line
@@ -524,6 +528,124 @@ def pick_version(pid: int, idx: int, body: dict = Body(...)):
     if not worker.page_busy(db.get("pages", pid)):
         worker.compose_page(pid)
     return _page_view(db.get("pages", pid))
+
+
+@app.post("/api/characters/{cid}/describe")
+def describe_character(cid: int):
+    """Looks in words from the source picture by the local vision LLM (LLM mode)."""
+    ch = db.get("characters", cid)
+    if not ch:
+        raise HTTPException(404, "no such character")
+    try:
+        text = worker.describe(ch["source_image"])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"could not describe: {e}"[:200])
+    return {"traits": text}
+
+
+# ---------- GPU mode (drawing <-> local LLM) ----------
+@app.get("/api/mode")
+def gpu_mode():
+    st = gpuhelper.status()
+    return {"helper": st is not None, "status": st, "llm": director.llm_state(), "comfy": worker.STATUS["comfy"]}
+
+
+@app.post("/api/mode")
+def set_gpu_mode(body: dict = Body(...)):
+    m = body.get("mode")
+    if m not in ("llm", "draw"):
+        raise HTTPException(400, "mode is llm or draw")
+    if not gpuhelper.available():
+        raise HTTPException(503, "the GPU switch is not set up (no helper key)")
+    if m == "llm" and _queue_count():
+        raise HTTPException(409, "pictures are still being drawn: wait or stop them first")
+    try:
+        msg = gpuhelper.mode("llm-mode" if m == "llm" else "draw-mode")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(409, str(e)[:200])
+    db.bump()
+    return {"ok": True, "msg": msg}
+
+
+# ---------- director ----------
+@app.get("/api/director/chats")
+def dchats():
+    return db.query("SELECT * FROM dchats ORDER BY id DESC LIMIT 100")
+
+
+@app.post("/api/director/chats")
+def new_dchat():
+    return db.get("dchats", db.insert("dchats", title=""))
+
+
+@app.get("/api/director/chats/{cid}")
+def dchat(cid: int):
+    c = db.get("dchats", cid)
+    if not c:
+        raise HTTPException(404, "no such director chat")
+    return {"chat": c, "messages": db.query("SELECT * FROM dmsgs WHERE chat_id=? ORDER BY id", (cid,))}
+
+
+@app.post("/api/director/chats/{cid}/messages")
+def dsend(cid: int, body: dict = Body(...)):
+    c = db.get("dchats", cid)
+    if not c:
+        raise HTTPException(404, "no such director chat")
+    text = (body.get("text") or "").strip()
+    if not text or len(text) > 20000:
+        raise HTTPException(400, "write a message (max 20000 characters)")
+    if db.one("SELECT id FROM dmsgs WHERE chat_id=? AND status='working'", (cid,)):
+        raise HTTPException(409, "the director is still answering")
+    if director.llm_state()["state"] == "off":
+        raise HTTPException(503, "the local LLM is off: tap LLM up first")
+    chars = []
+    for s_ in (body.get("chars") or [])[:4]:
+        ch = db.one("SELECT name, traits FROM characters WHERE slug=? AND status='ready'", (s_,))
+        if ch:
+            chars.append(ch)
+    if body.get("chars") is not None:
+        db.update("dchats", cid, chars=[str(x) for x in body.get("chars")][:4])
+    if not c["title"]:
+        db.update("dchats", cid, title=text.splitlines()[0][:60])
+    aid = director.send(cid, text, chars)
+    return db.get("dmsgs", aid)
+
+
+@app.post("/api/director/messages/{mid}/shotlist")
+def dsave_shotlist(mid: int, body: dict = Body(...)):
+    """The user's edits to a shot list (the next turn sends them back to the model)."""
+    m = db.get("dmsgs", mid)
+    if not m or m["role"] != "assistant":
+        raise HTTPException(404, "no such answer")
+    sl = body.get("shotlist")
+    if not isinstance(sl, dict) or not isinstance(sl.get("panels"), list):
+        raise HTTPException(400, "bad shot list")
+    db.update("dmsgs", mid, shotlist=sl)
+    return {"ok": True}
+
+
+@app.post("/api/director/messages/{mid}/page")
+def dpage(mid: int):
+    """Shot list -> what Make page needs: 4 lines + the scene bible."""
+    m = db.get("dmsgs", mid)
+    if not m or not m.get("shotlist"):
+        raise HTTPException(404, "no shot list")
+    lines, bible = director.page_lines(m["shotlist"])
+    return {"lines": lines, "bible": bible}
+
+
+@app.get("/api/director/skills")
+def dskills():
+    return {"text": director.skills(), "custom": director.skills_path().exists()}
+
+
+@app.put("/api/director/skills")
+def dset_skills(body: dict = Body(...)):
+    t = body.get("text")
+    if t is not None and (not isinstance(t, str) or len(t) > 50000):
+        raise HTTPException(400, "bad skills text")
+    director.set_skills(t)
+    return dskills()
 
 
 # ---------- GPU line ----------

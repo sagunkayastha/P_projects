@@ -70,7 +70,7 @@ if (window.visualViewport) {
 }
 
 // ---------- navigation + back button ----------
-const VIEWS = { chat: "Chat", gallery: "Gallery", chars: "Characters", char: "Character", page: "Make page" };
+const VIEWS = { chat: "Chat", gallery: "Gallery", chars: "Characters", char: "Character", director: "Director", page: "Make page" };
 let cur = { view: "chat", ov: [] };
 
 function apply(st) {
@@ -159,6 +159,7 @@ async function refresh() {
       else if (cur.view === "chars") await loadChars();
       else if (cur.view === "char") await loadChar(cur.id);
       else if (cur.view === "page") await loadPages();
+      else if (cur.view === "director") await loadDirector();
       if (cur.ov.includes("drawer")) await loadDrawer();
     } while (again);
   } catch (e) { /* shown by the sync dot; next change retries */ }
@@ -667,6 +668,7 @@ function reviewCard(c) {
 let pageSel = new Set(LS.get("manga-pagechars", []));
 const lineIds = ["l1", "l2", "l3", "l4"];
 const pageDraft = LS.get("manga-pagelines", ["", "", "", ""]);
+{ const b = $("#lbible"); b.value = LS.get("manga-pagebible", ""); b.addEventListener("input", () => LS.set("manga-pagebible", b.value)); }
 lineIds.forEach((id, i) => { const t = $("#" + id); t.value = pageDraft[i] || ""; t.addEventListener("input", () => { pageDraft[i] = t.value; LS.set("manga-pagelines", pageDraft); }); });
 async function loadPages() {
   await loadCharList();
@@ -786,6 +788,11 @@ $("#pageform").addEventListener("submit", async (e) => {
   const lines = lineIds.map((id) => $("#" + id).value.trim());
   const miss = lines.findIndex((x) => !x);
   if (miss >= 0) { toast(`Write panel ${miss + 1} first`); $("#" + lineIds[miss]).focus(); return; }
+  const md = await api("GET", "/api/mode").catch(() => null);
+  if (md && md.status && md.status.comfyui_manga !== "running") {
+    toast("Drawing is stopped (LLM mode). Open 🎬 Director and tap LLM down first.", { err: true, action: "Open", onaction: () => go("director") });
+    return;
+  }
   let pick = [...pageSel];
   if (!pick.length) {
     const r = await noCharSheet(lines);
@@ -796,13 +803,177 @@ $("#pageform").addEventListener("submit", async (e) => {
   const b = $("#makepage");
   b.disabled = true; b.textContent = "Starting…";
   try {
-    await api("POST", "/api/pages", { lines, chars: pick });
+    await api("POST", "/api/pages", { lines, chars: pick, bible: $("#lbible").value.trim() });
     toast("Page started: 4 panels, about 1 min");
     await loadPages();
     $("#pagelist").scrollIntoView({ behavior: "smooth" });
   } catch (err) { toast(err.message, { err: true }); }
   finally { b.disabled = false; b.textContent = "Make page"; }
 });
+
+// ---------- director: chat with the local LLM -> shot list -> Make page ----------
+let dchatId = LS.get("manga-dchat", null), dmsgs = [], dmode = null, dpoll = null;
+const dsel = new Set(LS.get("manga-dchars", []));
+const dIds = ["d1", "d2", "d3", "d4", "dnotes", "dtext"];
+const dDraft = LS.get("manga-ddraft", {});
+for (const id of dIds) { const t = $("#" + id); t.value = dDraft[id] || ""; t.addEventListener("input", () => { dDraft[id] = t.value; LS.set("manga-ddraft", dDraft); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 140) + "px"; }); }
+
+function modeCard(m) {
+  const box = $("#modecard");
+  const st = m && m.status;
+  let text, btn = null, cls = "";
+  if (!m || !m.helper) { text = m && m.llm.state !== "off" ? `LLM ${m.llm.state}${m.llm.model ? " · " + m.llm.model : ""}` : "Local LLM is off. Start Local LLMs first (llm-up or the hub card)."; cls = m && m.llm.state !== "off" ? "" : "warn"; }
+  else if (st && st.error) { text = "GPU switch not reachable: " + st.error; cls = "warn"; }
+  else if (st.switching) { text = "Switching the GPU… (about 1 min)"; cls = "busy"; }
+  else if (st.gameMode) { text = "Game mode is on: GPU busy."; cls = "warn"; }
+  else if (st.llm !== "OFF") {
+    const ls = m.llm.state;
+    text = ls === "ready" ? `LLM ready (${m.llm.model}) · drawing stopped` : ls === "loading" ? "LLM loading the model… · drawing stopped" : "LLM on (model loads with the first message) · drawing stopped";
+    btn = el("button", { class: "btn", onclick: () => setMode("draw") }, "LLM down · back to drawing");
+  } else if (st.comfyui_manga === "running") {
+    text = "Drawing mode: ComfyUI has the GPU. The Director needs the LLM.";
+    btn = el("button", { class: "btn star", onclick: () => setMode("llm") }, "LLM up");
+  } else { text = "Nothing on the GPU."; btn = el("button", { class: "btn", onclick: () => setMode("draw") }, "Start drawing"); }
+  box.className = "modecard " + cls;
+  box.replaceChildren(...[el("span", { class: "mtext", text }), btn].filter(Boolean));
+  const waiting = st && (st.switching || (st.llm !== "OFF" && m.llm.state === "loading"));
+  clearTimeout(dpoll);
+  if (waiting && cur.view === "director") dpoll = setTimeout(() => refresh(), 3000);
+}
+async function setMode(mode) {
+  try {
+    if (mode === "llm" && queueN) { toast("Pictures are still being drawn: wait or stop them first", { err: true }); return; }
+    await api("POST", "/api/mode", { mode });
+    toast(mode === "llm" ? "Stopping drawing, starting the LLM (about 1 min)" : "Stopping the LLM, starting drawing (about 1 min)");
+    refresh();
+  } catch (e) { toast(e.message, { err: true }); }
+}
+async function loadDirector() {
+  await loadCharList();
+  dmode = await api("GET", "/api/mode").catch(() => null);
+  modeCard(dmode);
+  if (dchatId) {
+    try { const d = await api("GET", `/api/director/chats/${dchatId}`); dmsgs = d.messages; }
+    catch (e) { if (/no such/.test(e.message)) { dchatId = null; LS.set("manga-dchat", null); dmsgs = []; } else throw e; }
+  } else dmsgs = [];
+  const ready = chars.filter((c) => c.status === "ready");
+  $("#dchars").replaceChildren(...(ready.length ? ready.map((c) => el("button", { type: "button", class: "chip" + (dsel.has(c.slug) ? " on" : ""), onclick: () => {
+    if (dsel.has(c.slug)) dsel.delete(c.slug); else dsel.add(c.slug); LS.set("manga-dchars", [...dsel]); loadDirector(); } }, c.name)) : [el("span", { class: "sub", text: "No characters yet (★ on any picture)." })]));
+  const first = !dmsgs.length;
+  $("#dfirst").hidden = !first;
+  $("#dtext").hidden = first;
+  renderDirector();
+}
+function renderDirector() {
+  const box = $("#dlog");
+  const ae = document.activeElement;
+  if (ae && box.contains(ae) && ae.tagName === "TEXTAREA") return;  // editing a field: no repaint
+  const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  const kids = [el("div", { class: "dtools" },
+    el("button", { class: "btn small", onclick: newDirector }, "+ New"),
+    el("button", { class: "btn small", onclick: skillsSheet }, "Director skills"))];
+  if (!dmsgs.length) kids.push(el("div", { class: "empty", text: "Write your panel lines below. The Director turns them into a shot list (shots, angles, poses, place, light) you can change by chatting, then sends it to Make page." }));
+  const lastSl = [...dmsgs].reverse().find((m) => m.shotlist);
+  for (const m of dmsgs) {
+    if (m.role === "user") {
+      const cut = m.content.indexOf("\n\nI edited the shot list by hand");
+      kids.push(el("div", { class: "msg" }, el("div", { class: "me", text: cut >= 0 ? m.content.slice(0, cut) + "\n(+ my hand edits)" : m.content })));
+      continue;
+    }
+    const node = el("div", { class: "dans" });
+    if (m.status === "working") node.append(el("div", { class: "st", text: m.content ? `writing… ${m.content.length} characters` : (dmode && dmode.llm.state !== "ready" ? "loading the model, then writing…" : "thinking…") }), el("div", { class: "bar ind" }, el("i")));
+    else if (m.status === "failed") node.append(el("div", { class: "st err", text: "failed: " + (m.error || "") }), el("button", { class: "btn", onclick: () => retryDirector(m) }, "↻ Try again"));
+    else if (m.shotlist) {
+      const prose = m.content.replace(/```(?:json)?[\s\S]*?```/g, "").replace(/\{[\s\S]*\}/, "").trim();
+      if (prose) node.append(el("div", { class: "dtext", text: prose }));
+      node.append(shotCard(m, m === lastSl));
+    }
+    else node.append(el("div", { class: "dtext", text: m.content }), m.error ? el("div", { class: "st err", text: m.error }) : null);
+    kids.push(node);
+  }
+  box.replaceChildren(...kids);
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+const dEdited = {};
+function shotCard(m, latest) {
+  const sl = m.shotlist;
+  const save = () => { dEdited[m.id] = true; clearTimeout(save.t); save.t = setTimeout(() => api("POST", `/api/director/messages/${m.id}/shotlist`, { shotlist: sl }).catch((e) => toast(e.message, { err: true })), 600); };
+  const field = (obj, k, label, rows) => {
+    const t = el("textarea", { rows: String(rows || 1), "data-k": k });
+    t.value = Array.isArray(obj[k]) ? obj[k].join(", ") : (obj[k] || "");
+    t.addEventListener("input", () => { obj[k] = k === "characters" ? t.value.split(",").map((x) => x.trim()).filter(Boolean) : t.value; save(); });
+    return el("label", { class: "fld" }, el("span", { text: label }), t);
+  };
+  const b = sl.bible || (sl.bible = {});
+  const body = el("div", { class: "shots" },
+    el("h3", { text: sl.title || "Shot list" }),
+    el("details", { class: "bible", open: latest || undefined }, el("summary", { text: "Scene bible (same in every panel)" }),
+      field(b, "location", "Place", 2), field(b, "time_light", "Time + light", 2), field(b, "props", "Props", 2), field(b, "wardrobe", "Clothes", 2), field(b, "mood", "Mood")),
+    ...(sl.panels || []).map((p, i) => el("details", { class: "shot", open: latest || undefined },
+      el("summary", {}, el("b", { text: `Panel ${i + 1}` }), ` · ${p.shot || ""}${p.angle ? ", " + p.angle : ""}`),
+      field(p, "shot", "Shot"), field(p, "angle", "Angle"), field(p, "characters", "Who (exact names)"), field(p, "action", "Action + pose", 2),
+      field(p, "expression", "Face", 2), field(p, "setting", "Background", 2), field(p, "light", "Light"), field(p, "effects", "Manga effects"), field(p, "dialogue", "Dialogue"))),
+    (sl.review || []).length ? el("div", { class: "hint", text: "Check when drawn: " + sl.review.join(" · ") }) : null,
+    el("button", { class: "primary", type: "button", onclick: () => toPage(m) }, "📖 Send to Make page"));
+  return body;
+}
+async function toPage(m) {
+  try {
+    await api("POST", `/api/director/messages/${m.id}/shotlist`, { shotlist: m.shotlist });
+    const d = await api("POST", `/api/director/messages/${m.id}/page`);
+    d.lines.slice(0, 4).forEach((t, i) => { $("#" + lineIds[i]).value = t; pageDraft[i] = t; });
+    LS.set("manga-pagelines", pageDraft);
+    $("#lbible").value = d.bible; LS.set("manga-pagebible", d.bible);
+    const names = new Set((m.shotlist.panels || []).flatMap((p) => p.characters || []).map((n) => n.toLowerCase()));
+    const pick = chars.filter((c) => c.status === "ready" && names.has(c.name.toLowerCase())).map((c) => c.slug).slice(0, 2);
+    if (pick.length) { pageSel = new Set(pick); LS.set("manga-pagechars", pick); }
+    go("page");
+    const llmOn = dmode && dmode.status && dmode.status.llm !== "OFF";
+    toast(llmOn ? "Filled in. The LLM still has the GPU: tap LLM down in Director before Make page." : "Filled in from the Director. Check it, then Make page.", { ms: 7000 });
+  } catch (e) { toast(e.message, { err: true }); }
+}
+async function newDirector() { dchatId = null; LS.set("manga-dchat", null); dmsgs = []; for (const k of Object.keys(dEdited)) delete dEdited[k]; loadDirector(); }
+async function retryDirector(m) {
+  const u = [...dmsgs].reverse().find((x) => x.role === "user" && x.id < m.id);
+  if (u) await dsend(u.content);
+}
+async function dsend(text) {
+  if (!dchatId) { const c = await api("POST", "/api/director/chats"); dchatId = c.id; LS.set("manga-dchat", c.id); }
+  await api("POST", `/api/director/chats/${dchatId}/messages`, { text, chars: [...dsel] });
+}
+$("#dcomposer").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  let text;
+  if (!dmsgs.length) {
+    const lines = ["d1", "d2", "d3", "d4"].map((id) => $("#" + id).value.trim());
+    if (lines.filter(Boolean).length < 1) { toast("Write at least panel 1"); $("#d1").focus(); return; }
+    const names = chars.filter((c) => dsel.has(c.slug)).map((c) => c.name);
+    text = "Panel lines:\n" + lines.map((t, i) => `${i + 1}. ${t || "(you decide)"}`).join("\n") +
+      ($("#dnotes").value.trim() ? `\nNotes: ${$("#dnotes").value.trim()}` : "") + (names.length ? `\nCharacters in this page: ${names.join(", ")}` : "");
+  } else {
+    text = $("#dtext").value.trim();
+    if (!text) { $("#dtext").focus(); return; }
+    const last = [...dmsgs].reverse().find((m) => m.shotlist);
+    if (last && dEdited[last.id]) { text += "\n\nI edited the shot list by hand; start from my version:\n```json\n" + JSON.stringify(last.shotlist) + "\n```"; delete dEdited[last.id]; }
+  }
+  const b = $("#dsend"); b.disabled = true;
+  try {
+    await dsend(text);
+    for (const id of dIds) { if (id !== "dnotes" || dmsgs.length) { $("#" + id).value = ""; dDraft[id] = ""; } }
+    LS.set("manga-ddraft", dDraft);
+    refresh();
+  } catch (err) { toast(err.message, { err: true }); }
+  finally { b.disabled = false; }
+});
+async function skillsSheet() {
+  const d = await api("GET", "/api/director/skills");
+  const t = el("textarea", { rows: "16", class: "mono" }); t.value = d.text;
+  openSheet(el("div", {}, el("h2", { text: "Director skills" }),
+    el("div", { class: "sub", text: "The Director's instructions (system prompt), used on every message." + (d.custom ? " Your edited version." : " Default version.") }), t,
+    el("div", { class: "two" },
+      el("button", { class: "ghost", type: "button", onclick: async () => { await api("PUT", "/api/director/skills", { text: null }); closeOv("sheet"); toast("Back to the default skills"); } }, "Reset"),
+      el("button", { class: "primary", type: "button", onclick: async () => { await api("PUT", "/api/director/skills", { text: t.value }); closeOv("sheet"); toast("Skills saved"); } }, "Save"))));
+}
 
 // ---------- drawer ----------
 async function loadDrawer() {

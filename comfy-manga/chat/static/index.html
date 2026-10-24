@@ -52,6 +52,26 @@
     <div class="scroll" id="chardetail"></div>
   </section>
 
+  <section id="v-director" class="view" hidden>
+    <div id="modecard" class="modecard"></div>
+    <div class="scroll" id="dlog"></div>
+    <form id="dcomposer" autocomplete="off">
+      <div id="dfirst">
+        <div class="label">Characters</div>
+        <div id="dchars" class="chips wrap"></div>
+        <textarea id="d1" rows="1" placeholder="Panel 1: what happens"></textarea>
+        <textarea id="d2" rows="1" placeholder="Panel 2"></textarea>
+        <textarea id="d3" rows="1" placeholder="Panel 3"></textarea>
+        <textarea id="d4" rows="1" placeholder="Panel 4"></textarea>
+        <textarea id="dnotes" rows="2" placeholder="Extra notes: mood, place, time, anything"></textarea>
+      </div>
+      <div class="row">
+        <textarea id="dtext" rows="1" placeholder="Ask for changes…" hidden></textarea>
+        <button id="dsend" class="send" aria-label="send">➤</button>
+      </div>
+    </form>
+  </section>
+
   <section id="v-page" class="view" hidden>
     <div class="scroll">
       <form id="pageform" class="card">
@@ -66,6 +86,8 @@
         <textarea id="l3" rows="2" placeholder="close-up: Mia's eyes go wide as she reads"></textarea>
         <label class="label" for="l4">Panel 4 · bottom</label>
         <textarea id="l4" rows="2" placeholder='Mia runs out of the room. "I have to find him!"'></textarea>
+        <label class="label" for="lbible">Same in every panel (scene bible, optional)</label>
+        <textarea id="lbible" rows="2" placeholder="e.g. small wooden cafe, rainy evening, warm lamp over the counter"></textarea>
         <div class="hint">Write the character's name in a line to put them in that panel (a line with no name gets all picked characters; "she"/"he" or nicknames do not count). You can change who is in a panel later with ✎ Edit. Speech in "quotes" becomes a speech bubble. Read right to left: 1 top, 2 right, 3 left, 4 bottom.</div>
         <button id="makepage" class="primary" type="submit">Make page</button>
       </form>
@@ -81,6 +103,7 @@
   <button class="ditem" data-view="chat">💬 Chat</button>
   <button class="ditem" data-view="gallery">🖼 Gallery <span id="gcount" class="dim"></span></button>
   <button class="ditem" data-view="chars">👤 Characters</button>
+  <button class="ditem" data-view="director">🎬 Director</button>
   <button class="ditem" data-view="page">📖 Make page</button>
   <div class="dsub">Chats</div>
   <div id="chatlist"></div>

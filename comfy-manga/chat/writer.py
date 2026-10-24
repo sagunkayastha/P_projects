@@ -5,13 +5,12 @@ Uses the local LLM (llama.cpp router on the host, :11434) only when a model is a
 import json
 import os
 import re
-import urllib.request
 
+import gpu
 import graphs
 import layout
 import refs
 
-LLM = os.environ.get("LLM_URL", "http://host.docker.internal:11434")
 FRAMING = ["Wide establishing shot that shows the place", "Medium shot", "Close-up on the face and hands",
            "Medium-wide shot"]
 
@@ -31,25 +30,22 @@ def cast_text(chars):
     return "; ".join(parts) + "." if parts else ""
 
 
-def template(scene, chars, framing):
+def template(scene, chars, framing, bible=""):
     keep = ("Keep each character's face, hair, body and outfit exactly as in the reference pictures. "
             if chars else "")
     shot = f"{framing}. " if framing else ""
     n = refs.per_char(len(chars))
     chars = [{**c, "n": c.get("n", n)} for c in chars]
     scene = scene.strip().rstrip(".") + "."
-    return (f"Manga panel. {shot}{cast_text(chars)} Scene: {scene} {keep}{graphs.STYLE} "
+    same = f"Same in every panel of this page: {bible.strip().rstrip('.')}. " if bible else ""
+    return (f"Manga panel. {shot}{cast_text(chars)} Scene: {scene} {same}{keep}{graphs.STYLE} "
             "The drawing fills the whole picture edge to edge. No text, no letters, no speech bubbles, no panel borders, "
             "no white bars.").replace("  ", " ")
 
 
 def _loaded_model():
-    try:
-        with urllib.request.urlopen(LLM + "/models", timeout=2) as r:
-            data = json.load(r)
-    except Exception:
-        return None
-    for m in data.get("data", []):
+    data = gpu.models()
+    for m in (data or {}).get("data", []):
         st = m.get("status")
         if (st.get("value") if isinstance(st, dict) else st) == "loaded":
             return m.get("id")
@@ -66,11 +62,9 @@ def _llm(model, lines, chars):
            "Also return each line with only its spelling mistakes fixed (same words otherwise, keep \"quotes\").\n"
            + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(lines)) +
            '\nAnswer with JSON only: {"panels": ["...", "...", "...", "..."], "fixed": ["...", "...", "...", "..."]}')
-    body = {"model": model, "messages": [{"role": "user", "content": ask}], "temperature": 0.4, "max_tokens": 600}
-    req = urllib.request.Request(LLM + "/v1/chat/completions", json.dumps(body).encode(),
-                                 {"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=90) as r:
-        text = json.load(r)["choices"][0]["message"]["content"]
+    body = {"model": model, "messages": [{"role": "user", "content": ask}], "temperature": 0.4, "max_tokens": 1200,
+            "chat_template_kwargs": {"enable_thinking": False}}
+    text = gpu.chat(body)["choices"][0]["message"]["content"]
     m = re.search(r"\{.*\}", text, re.S)
     d = json.loads(m.group(0))
     panels = d["panels"]
@@ -99,16 +93,16 @@ def framing(scene, idx):
     return None if SHOT_WORDS.search(scene) else FRAMING[idx % len(FRAMING)]
 
 
-def panel(line, chars, idx, cast=None):
+def panel(line, chars, idx, cast=None, bible=""):
     """One panel again (after the user edits its line or its characters): (prompt, quotes, cast).
     cast: indexes into chars chosen by the user; None = the characters the line names."""
     scene, quotes = layout.split_line(line)
     if cast is None:
         cast = who(scene, chars)
-    return template(scene, [chars[i] for i in cast], framing(scene, idx)), quotes, cast
+    return template(scene, [chars[i] for i in cast], framing(scene, idx), bible), quotes, cast
 
 
-def write(lines, chars):
+def write(lines, chars, bible=""):
     """Returns (prompts, quotes, cast per panel (indexes into chars), writer-name, spelling-fixed lines or None).
     Each panel gets only the characters its line names, so klein does not draw someone twice."""
     split = [layout.split_line(ln) for ln in lines]
@@ -123,9 +117,9 @@ def write(lines, chars):
                 if f:
                     sc, quotes[k] = layout.split_line(f)
                     casts[k] = who(sc, chars)
-            return ([template(s, [chars[i] for i in casts[k]], None) for k, s in enumerate(shots)], quotes, casts,
+            return ([template(s, [chars[i] for i in casts[k]], None, bible) for k, s in enumerate(shots)], quotes, casts,
                     f"local LLM ({model})", fixed)
         except Exception:
             pass
-    return ([template(s, [chars[i] for i in casts[k]], framing(s, k)) for k, s in enumerate(scenes)], quotes, casts,
+    return ([template(s, [chars[i] for i in casts[k]], framing(s, k), bible) for k, s in enumerate(scenes)], quotes, casts,
             "template", [None] * 4)

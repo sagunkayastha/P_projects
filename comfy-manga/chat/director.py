@@ -8,12 +8,11 @@ import os
 import re
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 import db
+import gpu
 
-LLM = os.environ.get("LLM_URL", "http://host.docker.internal:11434")
 MODEL = os.environ.get("DIRECTOR_MODEL", "qwen36")
 DEFAULT_SKILLS = Path(__file__).resolve().parent / "director-skills.md"
 SCHEMA = """
@@ -53,10 +52,8 @@ def set_skills(text):
 
 def llm_state():
     """off (router not running) | idle (running, no model loaded) | loading | ready (model loaded)."""
-    try:
-        with urllib.request.urlopen(LLM + "/models", timeout=3) as r:
-            data = json.load(r)
-    except Exception:
+    data = gpu.models()
+    if not data:
         return {"state": "off", "model": None}
     for m in data.get("data", []):
         st = m.get("status")
@@ -64,16 +61,6 @@ def llm_state():
         if st in ("loaded", "loading"):
             return {"state": "ready" if st == "loaded" else "loading", "model": m.get("id")}
     return {"state": "idle", "model": None}
-
-
-def unload():
-    try:
-        req = urllib.request.Request(LLM + "/models/unload", json.dumps({"model": MODEL}).encode(),
-                                     {"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=30).read()
-        return True
-    except Exception:
-        return False
 
 
 def _system(chars):
@@ -120,25 +107,22 @@ def _answer(chat_id, aid, chars):
             msgs.append({"role": h["role"], "content": h["content"]})
         body = {"model": MODEL, "messages": msgs, "stream": True, "temperature": 0.6, "max_tokens": 6000,
                 "chat_template_kwargs": {"enable_thinking": False}}
-        req = urllib.request.Request(LLM + "/v1/chat/completions", json.dumps(body).encode(),
-                                     {"Content-Type": "application/json"})
         out, last = [], 0.0
-        with urllib.request.urlopen(req, timeout=600) as r:
-            for raw in r:
-                line = raw.decode("utf-8", "ignore").strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    delta = json.loads(data)["choices"][0].get("delta", {}).get("content") or ""
-                except (ValueError, KeyError, IndexError):
-                    continue
-                out.append(delta)
-                if time.time() - last > 0.7:
-                    last = time.time()
-                    db.update("dmsgs", aid, content="".join(out))
+        for raw in gpu.chat_stream(body):
+            line = raw.decode("utf-8", "ignore").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                delta = json.loads(data)["choices"][0].get("delta", {}).get("content") or ""
+            except (ValueError, KeyError, IndexError):
+                continue
+            out.append(delta)
+            if time.time() - last > 0.7:
+                last = time.time()
+                db.update("dmsgs", aid, content="".join(out))
         text = re.sub(r"<think>.*?</think>", "", "".join(out), flags=re.S).strip()
         sl = parse_shotlist(text)
         db.update("dmsgs", aid, content=text, shotlist=sl, status="done",

@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""manga-gpu — the only thing the manga app container may run on this PC (forced command in
+~/.ssh/authorized_keys, key manga-app@laanta-chy, from the docker bridge only). Verb from SSH_ORIGINAL_COMMAND:
+  status      JSON: game mode, LLM engine (llm-status word), comfyui-manga + main comfyui container states
+  llm-mode    stop comfyui-manga (frees the 5070 Ti), then llm-up            (detached, log below)
+  draw-mode   llm-down, then start comfyui-manga again                        (detached)
+  models      GET http://127.0.0.1:11434/models  (the router listens on localhost only)
+  chat        POST stdin (JSON, max 2 MB) to http://127.0.0.1:11434/v1/chat/completions, answer streamed to stdout
+  unload      POST stdin (JSON, max 4 KB) to http://127.0.0.1:11434/models/unload
+Exit: 0 ok, 2 refused, 5 failed. Nothing from the caller reaches a shell or a command line.
+Install: ln -s <repo>/comfy-manga/host/manga-gpu ~/.local/bin/manga-gpu (see comfy-manga/host/README.md)."""
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+
+HOME = os.path.expanduser("~")
+BIN = os.path.join(HOME, ".local", "bin")
+LLM = "http://127.0.0.1:11434"
+LOG = os.path.join(HOME, ".cache", "manga-gpu", "actions.log")
+COMFY = "comfyui-manga"
+MAIN_COMFY = "comfyui"
+ENV = {**os.environ, "PATH": f"{BIN}:/usr/local/bin:/usr/bin:/bin"}
+STEPS = {  # fixed argv lists only
+    "llm-mode": [["docker", "stop", COMFY], [os.path.join(BIN, "llm-up")]],
+    "draw-mode": [[os.path.join(BIN, "llm-down")], ["docker", "start", COMFY]],
+}
+
+
+def run(argv, timeout=20):
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=ENV)
+
+
+def container(name):
+    r = run(["docker", "inspect", "-f", "{{.State.Status}}", name])
+    return r.stdout.strip() if r.returncode == 0 else "missing"
+
+
+def status():
+    g = run([os.path.join(BIN, "game-mode"), "status"])
+    r = run([os.path.join(BIN, "llm-status")])
+    word = (r.stdout or "").strip().split()[0] if (r.stdout or "").strip() else "OFF"
+    busy = os.path.exists(LOG + ".busy")
+    return {"gameMode": g.returncode == 0 and g.stdout.strip() == "on", "llm": word[:16],
+            "comfyui_manga": container(COMFY), "comfyui_main": container(MAIN_COMFY), "switching": busy}
+
+
+def action(verb):
+    st = status()
+    if st["gameMode"]:
+        print("refused: game mode is on", file=sys.stderr)
+        return 2
+    if verb == "llm-mode" and st["comfyui_main"] == "running":
+        print("refused: the main ComfyUI is running on the GPU", file=sys.stderr)
+        return 2
+    os.makedirs(os.path.dirname(LOG), exist_ok=True)
+    script = " && ".join(" ".join("'" + a.replace("'", "'\\''") + "'" for a in argv) for argv in STEPS[verb])
+    script = f"touch '{LOG}.busy'; {script}; rm -f '{LOG}.busy'"
+    with open(LOG, "a") as log:
+        log.write(f"{time.strftime('%F %T')} {verb}\n")
+        log.flush()
+        subprocess.Popen(["/bin/sh", "-c", script], stdout=log, stderr=log, stdin=subprocess.DEVNULL,
+                         start_new_session=True, env=ENV)
+    print(f"{verb} started")
+    return 0
+
+
+def relay(path, body=None, stream=False):
+    req = urllib.request.Request(LLM + path, body, {"Content-Type": "application/json"} if body else {})
+    try:
+        with urllib.request.urlopen(req, timeout=900) as r:
+            while True:
+                chunk = r.read1(8192) if stream else r.read()
+                if not chunk:
+                    break
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+                if not stream:
+                    break
+    except Exception as e:  # noqa: BLE001
+        print(f"LLM not reachable: {type(e).__name__}", file=sys.stderr)
+        return 5
+    return 0
+
+
+def read_body(limit):
+    data = sys.stdin.buffer.read(limit + 1)
+    if len(data) > limit:
+        print("refused: request too big", file=sys.stderr)
+        return None
+    try:
+        json.loads(data)
+    except ValueError:
+        print("refused: not JSON", file=sys.stderr)
+        return None
+    return data
+
+
+def main():
+    verb = (os.environ.get("SSH_ORIGINAL_COMMAND") or " ".join(sys.argv[1:])).strip()
+    if verb == "status":
+        print(json.dumps(status()))
+        return 0
+    if verb in STEPS:
+        return action(verb)
+    if verb == "models":
+        return relay("/models")
+    if verb == "chat":
+        body = read_body(2 * 1024 * 1024)
+        return relay("/v1/chat/completions", body, stream=True) if body else 2
+    if verb == "unload":
+        body = read_body(4096)
+        return relay("/models/unload", body) if body else 2
+    print(f"refused: {verb!r}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

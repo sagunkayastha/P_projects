@@ -7,6 +7,7 @@ services:
   app:
     volumes: !override
       - manga_priv:/data/manga
+      - ${HOME}/.config/manga-gpu:/keys:ro   # host helper key (GPU switch + LLM relay)
     environment:
       - APP_DIR=/data/manga/app
       - IMPORT_DIRS=

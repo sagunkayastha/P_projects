@@ -45,6 +45,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ${HOME}/Documents/Personal/manga:/data/manga   # mode 700
+      - ${HOME}/.config/manga-gpu:/keys:ro   # key for the host helper manga-gpu (GPU switch + LLM relay), not in git
     deploy:
       resources:
         reservations:

@@ -181,6 +181,46 @@ def flow_review(page):
     shot(page, "b4-4-ready")
 
 
+def flow_director(page):
+    page.goto(BASE + "/#director")
+    page.wait_for_selector("#modecard .mtext")
+    shot(page, "d1-empty")
+    check("mode card shows the LLM state", "LLM" in page.inner_text("#modecard"), page.inner_text("#modecard"))
+    page.locator("#dchars .chip", has_text="Nori").click()
+    page.locator("#dchars .chip", has_text="Bram").click()
+    for i, t in enumerate(["Nori runs into the cafe out of the rain", 'Bram looks up from the counter. "You forgot your umbrella again."',
+                           "she shakes the water off her scarf, embarrassed", 'close-up: Bram slides a hot cup to her. "On the house."']):
+        page.fill(f"#d{i + 1}", t)
+    page.fill("#dnotes", "cosy, late autumn evening, small wooden cafe")
+    shot(page, "d2-first-message")
+    page.click("#dsend")
+    page.wait_for_selector(".dans .shots", timeout=30000)
+    page.wait_for_timeout(800)
+    shot(page, "d3-shotlist")
+    check("shot list shown as 4 panels + bible", page.locator(".shots details.shot").count() == 4 and page.locator(".shots details.bible").count() == 1)
+    check("first-message form hidden, chat box shown", page.is_hidden("#dfirst") and page.is_visible("#dtext"))
+    # hand edit, then a chat edit
+    page.locator(".shots details.shot").nth(0).locator('textarea[data-k="light"]').fill("cold blue window light, rain streaks")
+    page.wait_for_timeout(900)
+    page.fill("#dtext", "make panel 2 a low angle")
+    page.click("#dsend")
+    page.wait_for_function("document.querySelectorAll('.dans .shots').length >= 2", timeout=30000)
+    page.wait_for_timeout(800)
+    msgs = api(f"/api/director/chats/{page.evaluate('LS.get(\"manga-dchat\")')}")["messages"]
+    check("edit turn: my hand edit was sent back to the model", "I edited the shot list" in msgs[2]["content"] and "cold blue window" in msgs[2]["content"])
+    check("edit turn: new shot list has panel 2 low angle", msgs[3]["shotlist"]["panels"][1]["angle"] == "low angle")
+    shot(page, "d4-after-edit")
+    page.locator(".dans .shots").last.locator(".primary").click()
+    page.wait_for_selector("#v-page:not([hidden])")
+    page.wait_for_timeout(500)
+    l2 = page.input_value("#l2")
+    check("Send to Make page fills lines + bible + characters", "low angle" in l2 and '"You forgot your umbrella again."' in l2
+          and "wooden cafe" in page.input_value("#lbible") and page.locator("#pagechars .chip.on").count() == 2, l2[:80])
+    shot(page, "d5-page-filled", full=True)
+    page.evaluate("document.querySelector('#makepage').scrollIntoView()")
+    shot(page, "d6-page-filled-bottom")
+
+
 with sync_playwright() as p:
     br = p.chromium.launch()
     ctx = br.new_context(viewport={"width": 360, "height": 780}, device_scale_factor=3, is_mobile=True, has_touch=True,
@@ -191,6 +231,8 @@ with sync_playwright() as p:
         flow_chat(pg)
     if WHAT in ("review", "all"):
         flow_review(pg)
+    if WHAT in ("director",):
+        flow_director(pg)
     ctx.close()
     br.close()
 

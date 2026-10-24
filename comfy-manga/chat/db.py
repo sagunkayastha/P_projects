@@ -58,6 +58,8 @@ def init():
     cols = {r[1] for r in _conn.execute("PRAGMA table_info(characters)")}
     if "traits" not in cols:  # added 2026-10-24: the character's looks in words
         _conn.execute("ALTER TABLE characters ADD COLUMN traits TEXT")
+    if "bible" not in {r[1] for r in _conn.execute("PRAGMA table_info(pages)")}:  # scene bible (Director)
+        _conn.execute("ALTER TABLE pages ADD COLUMN bible TEXT")
 
 
 def _row(r):

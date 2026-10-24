@@ -15,10 +15,10 @@ import uuid
 import base64
 import io
 import re
-import urllib.request
 
 import comfy
 import db
+import gpu
 import graphs
 import layout
 import media
@@ -36,7 +36,6 @@ WHOLE_FLOOR = float(os.environ.get("WHOLE_FLOOR", "0.90"))  # same, for views wi
 OUTFIT_FLOOR = 0.80  # outfit views: new clothes lower the whole-picture similarity on purpose
 PANEL_FACE = float(os.environ.get("PANEL_FACE", "0.45"))    # a panel face below this is someone else
 PANEL_WHOLE = float(os.environ.get("PANEL_WHOLE", "0.45"))  # no face and a whole picture below this: nobody there
-LLM = os.environ.get("LLM_URL", "http://host.docker.internal:11434")
 VISION_MODEL = os.environ.get("LLM_VISION_MODEL", "qwen36")
 TRAITS_ASK = ("This is a character design. List the visible traits that must stay the same in every drawing of this "
               "character: age and build, hair (length, style, shade), eyes, glasses or other accessories, face marks, "
@@ -362,20 +361,14 @@ def _progress(jid):
     return cb
 
 
-def _traits(job):
-    """Trait list of a character from its source picture, by the local vision LLM (llama.cpp router on the
-    host). Only when the router is up; ComfyUI is emptied first and the LLM unloaded after, so the two never
-    share the 16 GB card. No router: no list (the user can type one when saving the character)."""
-    ch = db.get("characters", job["params"]["char"])
-    try:
-        urllib.request.urlopen(LLM + "/models", timeout=3).read()
-    except Exception:
-        db.update("jobs", job["id"], status="done", error="local LLM is off: no trait list", finished=time.time())
-        return
-    comfy.free()
-    _family["v"] = None
+def describe(iid):
+    """Trait list of a character from its picture by the local vision LLM (through the manga-gpu helper).
+    Raises when the LLM is not running."""
+    data = gpu.models()
+    if not data:
+        raise RuntimeError("the local LLM is off")
     from PIL import Image
-    im = Image.open(io.BytesIO(media.read(ch["source_image"]))).convert("RGB")
+    im = Image.open(io.BytesIO(media.read(iid))).convert("RGB")
     im.thumbnail((768, 768))
     buf = io.BytesIO()
     im.save(buf, "PNG")
@@ -384,24 +377,21 @@ def _traits(job):
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()}},
                 {"type": "text", "text": TRAITS_ASK}]}]}
+    text = gpu.chat(body)["choices"][0]["message"]["content"]
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip().strip(".").replace("\n", " ")[:400]
+
+
+def _traits(job):
+    """Trait list at character time, only when the local LLM happens to be running (in drawing mode it is
+    off: the user can type the looks, or tap "Describe with AI" in LLM mode)."""
+    ch = db.get("characters", job["params"]["char"])
     try:
-        req = urllib.request.Request(LLM + "/v1/chat/completions", json.dumps(body).encode(),
-                                     {"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=300) as r:
-            text = json.load(r)["choices"][0]["message"]["content"]
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip().strip(".").replace("\n", " ")[:400]
+        text = describe(ch["source_image"])
         if text and not (ch.get("traits") or "").strip():
             db.update("characters", ch["id"], traits=text)
         db.update("jobs", job["id"], status="done", finished=time.time())
     except Exception as e:  # noqa: BLE001 - the set is still made without it
-        db.update("jobs", job["id"], status="done", error=f"trait list failed: {e}"[:300], finished=time.time())
-    finally:
-        try:
-            req = urllib.request.Request(LLM + "/models/unload", json.dumps({"model": VISION_MODEL}).encode(),
-                                         {"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=30).read()
-        except Exception:
-            pass
+        db.update("jobs", job["id"], status="done", error=f"no trait list: {e}"[:300], finished=time.time())
 
 
 def run(job):
