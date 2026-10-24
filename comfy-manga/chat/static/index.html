@@ -2,38 +2,109 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Manga Studio</title>
-<link rel="stylesheet" href="/static/style.css?v=1">
-<link rel="stylesheet" href="/static/studio.css?v=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#15191f">
+<meta name="color-scheme" content="dark">
+<title>Manga</title>
+<link rel="stylesheet" href="/static/app.css?v={{v}}">
 </head>
 <body>
-<header>
-  <span class="brand">Manga Studio</span>
-  <nav class="nav"><a href="/" class="on">Pictures</a><a href="/studio">Character</a></nav>
+<header id="top">
+  <button id="menu" class="icon" aria-label="menu">☰</button>
+  <h1 id="title">Chat</h1>
+  <span id="queue" class="badge" hidden></span>
+  <span id="conn" class="dot" title="connection"></span>
 </header>
+<div id="banner" hidden></div>
 
-<main id="feed"></main>
+<main>
+  <section id="v-chat" class="view">
+    <div id="log"><div id="log-empty" class="empty">Type what to draw. Each message makes one black-and-white manga picture.</div></div>
+    <button id="tobottom" class="pill" hidden>↓ newest</button>
+    <form id="composer" autocomplete="off">
+      <div class="chips">
+        <div class="seg" id="shape">
+          <button type="button" data-v="tall" class="on">Tall</button>
+          <button type="button" data-v="square">Square</button>
+          <button type="button" data-v="wide">Wide</button>
+        </div>
+        <button type="button" id="charpick" class="chip">With: nobody</button>
+      </div>
+      <div class="row">
+        <textarea id="text" rows="1" placeholder="a girl on a rooftop at night, wind in her hair" enterkeyhint="send"></textarea>
+        <button id="send" class="send" aria-label="send">➤</button>
+      </div>
+    </form>
+  </section>
 
-<footer>
-  <div id="estline" class="estline"></div>
-  <div id="gpu" class="gpu">GPU …</div>
-  <div class="chips" id="shape">
-    <button data-v="wide">wide</button>
-    <button data-v="square">square</button>
-    <button data-v="tall">tall</button>
+  <section id="v-gallery" class="view" hidden>
+    <div class="scroll" id="gallery-scroll">
+      <div id="grid" class="grid"></div>
+      <div id="grid-end" class="empty">loading…</div>
+    </div>
+  </section>
+
+  <section id="v-chars" class="view" hidden>
+    <div class="scroll"><div id="charlist" class="list"></div></div>
+  </section>
+
+  <section id="v-char" class="view" hidden>
+    <div class="scroll" id="chardetail"></div>
+  </section>
+
+  <section id="v-page" class="view" hidden>
+    <div class="scroll">
+      <form id="pageform" class="card">
+        <h2>Make a page</h2>
+        <div class="label">Characters (pick 1 or 2)</div>
+        <div id="pagechars" class="chips wrap"></div>
+        <label class="label" for="l1">Panel 1 · top</label>
+        <textarea id="l1" rows="2" placeholder="Mia walks into an empty classroom at sunset"></textarea>
+        <label class="label" for="l2">Panel 2 · right</label>
+        <textarea id="l2" rows="2" placeholder='Mia finds a letter on her desk. "What is this?"'></textarea>
+        <label class="label" for="l3">Panel 3 · left</label>
+        <textarea id="l3" rows="2" placeholder="close-up: Mia's eyes go wide as she reads"></textarea>
+        <label class="label" for="l4">Panel 4 · bottom</label>
+        <textarea id="l4" rows="2" placeholder='Mia runs out of the room. "I have to find him!"'></textarea>
+        <div class="hint">Speech in "quotes" becomes a speech bubble. Read right to left: 1 top, 2 right, 3 left, 4 bottom.</div>
+        <button id="makepage" class="primary" type="submit">Make page</button>
+      </form>
+      <div id="pagelist" class="list"></div>
+    </div>
+  </section>
+</main>
+
+<div id="shade"></div>
+<nav id="drawer" aria-label="menu">
+  <div class="dhead">Manga maker</div>
+  <button class="ditem primary" id="newchat">+ New chat</button>
+  <button class="ditem" data-view="chat">💬 Chat</button>
+  <button class="ditem" data-view="gallery">🖼 Gallery <span id="gcount" class="dim"></span></button>
+  <button class="ditem" data-view="chars">👤 Characters</button>
+  <button class="ditem" data-view="page">📖 Make page</button>
+  <div class="dsub">Chats</div>
+  <div id="chatlist"></div>
+  <div id="gpu" class="dfoot"></div>
+</nav>
+
+<div id="viewer" hidden>
+  <div id="vstrip"><div class="vslide"></div><div class="vslide"></div><div class="vslide"></div></div>
+  <div id="vbar">
+    <button id="vclose" class="icon" aria-label="close">✕</button>
+    <span id="vcount"></span>
+    <a id="vdl" class="icon" aria-label="download" download>⬇</a>
+    <button id="vchar" class="vbtn">★ Make character</button>
   </div>
-  <div class="composer">
-    <textarea id="prompt" rows="1" placeholder="a manga panel of…"></textarea>
-    <button id="send" class="icon send" title="generate">➤</button>
-  </div>
-</footer>
-
-<div id="lightbox" class="lightbox" hidden>
-  <img id="lightbox-img" alt="">
-  <button id="lightbox-close" title="close" aria-label="close">×</button>
 </div>
 
-<script src="/static/app.js?v=1"></script>
+<div id="sheet" hidden>
+  <div class="sheetbox">
+    <div id="sheet-body"></div>
+  </div>
+</div>
+
+<div id="toast" hidden></div>
+<script>window.APP_VERSION = "{{v}}";</script>
+<script src="/static/app.js?v={{v}}"></script>
 </body>
 </html>

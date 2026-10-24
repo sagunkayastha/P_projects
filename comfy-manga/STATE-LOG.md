@@ -1,5 +1,19 @@
 # comfy-manga — STATE-LOG (newest first)
 
+## 2026-10-24 06:10 — new mobile-first app: chat, gallery, characters, pages (rem-mangaapp, overnight)
+- Rewrote chat/app.py around an on-disk SQLite job table + worker (re-attach after app restart, re-send after
+  ComfyUI restart; both tested mid-job). All output in ~/Documents/Personal/manga/app.
+- New UI (static/index.html, app.js, app.css): chat with pending/queued/running/progress, long poll, hashed assets;
+  drawer; gallery with thumbs + infinite scroll; viewer (swipe/pinch/double-tap/pan/download/back).
+- Make character: 28 klein edits -> face check node (first try: cascade file unreadable (ADD 600 root) -> --chmod;
+  cascade found no faces at 896 px -> detect on a 384 px copy: 17/29) -> first ranking dropped all outfits
+  (whole-picture similarity) -> outfits kept separately. Test characters Rin, Kai (own prompts).
+- Make page: template prompts, 4 shaped panels RTL + bubbles; first test drew Rin twice in a Rin-only panel ->
+  panels get only the characters they name. Page ~75 s, character ~230 s.
+- Playwright mobile emulation: 40 checks (run 1: 36/40, test bugs; run 2: 39/40, test key reuse; final run see
+  STATE). Screens: ~/scratch/mangaapp/shots{1,2,3}. No Samsung reachable (no USB device; .179:5555 = AT&T TV).
+- Main ComfyUI stack (../comfyui) stopped for the night, restarted at the end.
+
 ## 2026-10-24 03:55 — 12 frames, ink refs, parked (rem-manga)
 - Ink references via Civitai LoRAs Mangalike_Anima + Pearly Cross-hatching (user key) -> haze-ink, rem-ink.
 - Gemini 12-shot list drawn: klein layouts (two-character wide shots dropped Rem until reworded) -> Anima + LLLite

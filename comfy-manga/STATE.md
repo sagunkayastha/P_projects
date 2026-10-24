@@ -1,72 +1,71 @@
 # comfy-manga — STATE
-Updated: 2026-10-24 03:55 (MDT) · by rem-manga (Claude, PC laanta-chy)
+Updated: 2026-10-24 06:10 (MDT) · by rem-mangaapp (Claude, PC laanta-chy)
 
 ## Goal
-Manga pipeline in one small app (ComfyUI + Anima Manga, Docker, GPU 0): consistent characters -> frames ->
-pages -> motion comic. Test story: Deadlock's Haze + Rem, "Not Your Mom" (Valve IP, private test, never publish).
+Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU 0): chat -> pictures,
+"Make character" from any picture, 4-panel pages. Original characters only (no Valve/Deadlock IP from 2026-10-24).
 
 ## Status
-- Overall: PARKED until next week (user 2026-10-24): frames still do not read as manga. Next step is proper
-  research, not more generation. App left running (ComfyUI :8288, app :8289). No GPU work in progress.
-- Works: Character studio (/studio, phone + desktop), saved characters on disk, variation sets, frames per script
-  line with methods klein9 / anima / restyle / control, /demo view (12 frames, old vs new refs, earlier 4 + tests).
-- Not done: motion-comic video (on hold; voice clips + word timings + renderer ready, never rendered).
-
-## What was tried (results)
-1. Anima Manga (beretMix v2.0) by tag: knows `haze (deadlock)` / `rem (deadlock)`, on-model full-body sheets, but
-   paints spot colour (fixed with a true-greyscale finish). In close-ups/two-shots it loses the characters and twice
-   drew unclothed figures.
-2. FLUX.2 klein 9B edit with saved character pictures as refs: identity + B/W kept 108/108 in variation sets
-   (4.4 s/pic), good compositions; camera low-angle never works. Frames look like a clean render, not manga.
-3. Restyles of klein frames (/demo "earlier 4"): A Anima img2img 0.38 (keeps render lighting; 0.48 drifts),
-   B A+MangaScreen, C strong ink prompt (whitens Haze's skin), D Manga-Lite (Levels whitens skin), E MangaScreen
-   finish -> user: "just added dots". Filters on a render do not make manga.
-4. F = Anima draws, klein frame only as layout (kohya ControlNet-LLLite any-test-v2, 1.0 to 60%; two-shots 1.2 to
-   100%), Haze identity via Anima IP-Adapter (0.7; it breaks Rem, so off for him). Real Anima linework, faces OK.
-   User: references themselves look smooth anime-cel, which carries into frames.
-5. Ink references (haze-ink, rem-ink): Anima + Civitai LoRAs Mangalike_Anima (3319816) 1.0 + Pearly Cross-hatching
-   (3407601) 1.0, sketch/ink/paper tags, flat-grey/cel negatives: more pen-like, still grey fills.
-6. Gemini (agy-box) 12-frame shot list -> klein layouts from ink refs -> F method with both LoRAs: 12 frames on /demo.
-   My critic: 3 redone (1 mirrored for screen direction, 2 wrong action, 6 strip came out full-body). Gemini critic:
-   frames 1, 3, 5, 8 (Haze drawn very busty, off-model), 9, 10 fail. User: still not manga.
-- Why it fails (my read): every frame starts from a model's idea of "anime illustration" (smooth shading, grey fills,
-  glamour proportions); manga look needs real page grammar (spot blacks, screentone by meaning, hatching, panel
-  composition) that neither prompts, LoRAs nor post filters gave. Anima also sexualises Haze unless pushed hard.
+- Overall: active. New app live on :8289 since 2026-10-24 ~06:15 (branch manga-app, merged to main).
+- Works (tested in Playwright mobile emulation, 360x780 touch, 40 checks + desktop 1280):
+  - Chat: instant send (pending bubble), queued/running with step progress, Stop, Again, clear "Not sent · retry"
+    on network errors (same ckey = no duplicate), sticky composer above the keyboard, no page reloads (long poll
+    /api/wait), hashed assets (stale-JS bug fixed: ?v=<hash> immutable, index no-store), dark, 360-390 px first.
+  - Everything on disk in ~/Documents/Personal/manga/app (700): app.db (SQLite) + images/ + thumbs/ +
+    characters/<slug>/ + pages/page-NNNN/. Jobs survive app restart (re-attach by prompt_id) and ComfyUI restart
+    (prompt sent again). Both tested mid-job.
+  - Gallery (drawer -> Gallery): all pictures newest first, WebP thumbs (360 px, 1080 px "m"), infinite scroll;
+    full-screen viewer: swipe, double-tap + pinch zoom, pan, download, back button closes. ram-backup-2026-10-24
+    (417 PNG) is copied into the gallery on app start (read only, idempotent).
+  - Make character (button on any picture): klein 9B edit of the picture, 28 views (8 angles x 3 faces + 4
+    outfits, one seed), face check (custom ComfyUI node MangaRefScore: anime-face cascade + SigLIP2) drops
+    drifted faces, keeps 4 outfits + 16 best angles = 20. ~3.5 min. Characters list with progress/Stop/Retry.
+  - Make page: 1-2 characters + 4 lines -> 4 panels (klein 9B, 2 refs per named character; a panel gets only the
+    characters its line names) -> page 1500x2250: top strip, right big + left narrow with slanted gutter, bottom
+    strip, read right to left, speech bubbles from "quoted" text. Redo one panel re-composes. ~75 s per page.
+    Panel prompts: local LLM only if a model is already loaded in the llama.cpp router, else template.
+- Not tested on the real Samsung: no phone on USB/adb. (192.168.0.179:5555 = AT&T TV box, left alone.)
 
 ## Next
-1. User/Rem: research first (what real AI-manga pipelines use: manga-trained checkpoints/LoRAs from real scans,
-   lineart-first + tone pass, artist-style LoRAs, Qwen-Image-Edit "redraw as manga" (MangaScreen's QWEN-Manga path)).
-2. Then: simpler studio UI (notes/studio-ui-notes.md), then the video.
+1. User: try it on the phone (http://192.168.0.235:8289). To let an agent test on the Samsung: enable USB
+   debugging (or wireless debugging + pair) once.
+2. Manga look research (parked, see STATE-LOG 03:55): pictures are clean klein/Anima renders, not real manga ink.
+3. Optional: per-panel prompt edit before redo; delete/hide in gallery (nothing deletes today).
 
 ## Blockers / waiting on
-- User's research decision next week.
+- Real-device test waits on the user enabling debugging on the Samsung.
 
 ## Decisions
-- 2026-10-24: Qwen-Image-Edit-2511 not downloaded (klein did not drift on variations); Qwen-Image 2.1 edit (MangaScreen
-  QWEN-Manga) not tried.
-- 2026-10-24: Haze is drawn per the wiki (mask band, messy bun, no hood) even where the shot list says hood/cloak.
-- Studio Anima pictures get a greyscale finish; nudity/kiss terms are in the global B/W negative.
+- 2026-10-24: one app at / (chat, gallery, characters, page). Old /studio and /demo routes removed from app.py
+  (code in git history; studio.py still used for the angle/outfit plan; store.py, routing.py, style.css,
+  studio.html/js/css, demo.html are now unused, left in place).
+- 2026-10-24: ComfyUI I/O over HTTP (/upload/image into input/studio = RAM, results via PreviewImage + /view);
+  the app keeps the only lasting copy on disk.
+- 2026-10-24: Anima chat negative adds swimsuit/bikini/lingerie/underwear/cleavage/text (it drifted to glamour
+  shots on a plain prompt).
+- Character ranking: drifted = face sim < set median - 0.15; outfits always kept unless drifted (whole-picture
+  similarity punishes new clothes). Heuristic; no real "other person" case seen yet in tests.
 
 ## Gotchas / do-not
-- One ComfyUI stack on GPU 0 at a time (this or ../comfyui). klein 9B fills the 16 GB card.
-- Never delete in ~/Documents/Personal/manga; "Remove from kept" only hides. work/out holds some unclothed rejects:
-  never show or publish work/out. Two-shots need strong layout control to the end.
-- IP-Adapter loader: keep auto_download OFF (encoder is local). Civitai key = ../comfyui/.civitai_token (never print).
-- Rebuilding the app stops running studio jobs (queued ones are marked failed).
-- Deadlock characters, voice clips and frames: Valve IP, private only.
+- One ComfyUI stack on GPU 0 at a time: stop ../comfyui (comfyui + chat) before starting this one (klein fills 16 GB).
+- Never delete in ~/Documents/Personal/manga. Never look at the user's own pictures (ram-backup, gallery):
+  tests use the test instance with its own data (~/scratch/mangaapp/testdata).
+- Rebuilding/restarting the app no longer loses jobs; restarting ComfyUI re-sends the running job.
+- Old work/out holds unclothed rejects from the studio era: never show or publish.
 
 ## Key paths & commands
-- App http://127.0.0.1:8289 (phone http://192.168.0.235:8289/studio, /demo, /demo?p=<project>); ComfyUI :8288.
-- `docker compose up -d` / `docker compose stop` here; `docker compose up -d --build app` after chat/ edits.
-- Images: app local/comfymanga:latest (chat/); ComfyUI local/comfyui-manga:cu130 (comfyui/Dockerfile = shared
-  cu130 + pinned kohya-ss/ComfyUI-Anima-LLLite b7495bd, LuciferTC9527/ComfyUI-Anima_IP-Adapter 6b77cd0,
-  Mirumo0u0/ComfyUI-Cosmos-Reference 6fd6b27).
-- Models (models/, hardlinks from ../comfyui where shared): beretMixAnimaManga_v20, qwen_3_06b_base, qwen_image_vae,
-  flux-2-klein-9b-nvfp4, qwen_3_8b_fp4mixed, flux2-vae; controlnet/anima-lllite-any-test-like-v2; ipadapter/
-  ip_adapter-Character_Reference-10; siglip2/siglip2-base-patch16-512; loras/Mangalike_Anima, pearly_cross_hatching.
-- Code: chat/app.py (routes, worker), studio.py (store, variation plan, frames), workflows.py (graphs), static/.
-- Data (700): ~/Documents/Personal/manga/{characters,frames,work,notes,scripts,audio}; frames projects:
-  deadlock-demo (4), deadlock-12 (12), refs; work/studio.db = job list.
-- Notes: notes/variation-test.md, notes/studio-ui-notes.md; shot list scripts/shotlist-gemini-v1.md.
-- Scratch (PC): ~/scratch/manga/{video (render.py, words.json), shot12 (klein/anima prompt scripts),
-  mangascreen (finish.py), nodes (read copies)}.
+- Live: http://127.0.0.1:8289 (phone http://192.168.0.235:8289); ComfyUI :8288. `docker compose up -d` here.
+- Test instance (:8290, own data): `docker build -t local/comfymanga:test chat && TEST_DATA=~/scratch/mangaapp/testdata
+  docker compose -f docker-compose.test.yml up -d`; flows: `docker run --rm --network host --ipc=host -u 1000
+  -v $PWD/tests:/t:ro -v <out>:/out local/pw-test:1.52 python /t/mobile_flows.py http://127.0.0.1:8290 /out`
+  (local/pw-test:1.52 = playwright/python:v1.52.0-noble + pip playwright; Dockerfile in ~/scratch/mangaapp/pw).
+- Rollback to the old app (images kept as tags):
+  `docker compose stop app && docker tag local/comfymanga:pre-app-20261024 local/comfymanga:latest &&
+  docker tag local/comfyui-manga:cu130-pre-app-20261024 local/comfyui-manga:cu130 &&
+  git show 0300075:comfy-manga/docker-compose.yml > docker-compose.yml && docker compose up -d --no-build --force-recreate`
+- Code (chat/): app.py (API), worker.py (job loop, characters, pages), db.py (SQLite + revision/long poll),
+  comfy.py (ComfyUI client), graphs.py (graphs on workflows.py), layout.py (page + bubbles), writer.py (panel
+  prompts), media.py (files, thumbs, import), static/{index.html,app.js,app.css}. ComfyUI node:
+  comfyui/nodes/manga_score. Tests: tests/mobile_flows.py.
+- Images: app local/comfymanga:latest; ComfyUI local/comfyui-manga:cu130 (+ opencv-headless 4.14.0.94, cascade
+  nagadomi/lbpcascade_animeface@4433ab1). Models as before (models/, siglip2 used by the face check).

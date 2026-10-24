@@ -1,5 +1,6 @@
 FROM python:3.12-slim
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]" python-multipart websocket-client
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" python-multipart websocket-client pillow
 WORKDIR /app
 COPY . /app
 EXPOSE 8189

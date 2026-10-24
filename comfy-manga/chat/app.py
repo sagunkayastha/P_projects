@@ -1,98 +1,58 @@
-"""Manga Studio — one page: type a prompt, get a manga illustration.
+"""Manga maker: chat -> pictures, characters from any picture, 4-panel pages. Mobile first, fully local.
 
-FastAPI app; talks to the ComfyUI container in this folder (service `comfyui`, :8188).
+FastAPI app; ComfyUI runs in its own container (COMFY_URL). Everything is stored on disk in APP_DIR
+(~/Documents/Personal/manga/app): SQLite (chats, jobs, images, characters, pages) + image files.
 """
-import json
+import asyncio
+import hashlib
 import os
-import queue
 import re
-import shutil
 import subprocess
 import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-import comfy
-import routing
-import store
+import db
+import graphs
+import layout
+import media
 import studio
-import workflows
+import worker
+import writer
 
-OUTPUT = Path(os.environ.get("OUTPUT_DIR", "/data/output"))
-SUB = os.environ.get("CHAT_SUBDIR", "manga")
 STATIC = Path(__file__).resolve().parent / "static"
-
-JOBS: "queue.Queue[int]" = queue.Queue()
-CANCELLING: set[int] = set()
-_cancel_lock = threading.Lock()
+ASSETS = ("app.js", "app.css")
 
 
-def _is_cancelling(mid):
-    with _cancel_lock:
-        return mid in CANCELLING
+def _version():
+    h = hashlib.sha1()
+    for name in ASSETS:
+        h.update((STATIC / name).read_bytes())
+    return h.hexdigest()[:10]
 
 
-def _clear_cancel(mid):
-    with _cancel_lock:
-        CANCELLING.discard(mid)
+VERSION = _version()
 
 
-def process(mid):
-    job = store.get(mid)
-    if job is None:
-        return
-    plan = json.loads(job["params"])
-    store.update(mid, status="running")
-    t0 = time.time()
-    try:
-        wf = workflows.anima(job["prompt"], plan["width"], plan["height"], plan["seed"], plan["prefix"])
-        entry = comfy.run_job(
-            wf,
-            cancel_check=lambda: _is_cancelling(mid),
-            on_progress=lambda v, m: store.update(mid, progress=v, total=m))
-        files = comfy.result_files(entry)
-        if not files:
-            raise RuntimeError("finished but produced no image")
-        sub, name = files[-1]
-        final = (OUTPUT / sub / name).resolve()
-        rel = str(final.relative_to(OUTPUT.resolve()))
-        store.update(mid, status="done", filename=rel, elapsed=time.time() - t0, progress=1, total=1)
-    except comfy.JobCancelled:
-        store.update(mid, status="cancelled", elapsed=time.time() - t0)
-    except Exception as e:  # noqa: BLE001 - show the failure in the feed
-        store.update(mid, status="failed", error=str(e)[:400], elapsed=time.time() - t0)
-    finally:
-        _clear_cancel(mid)
-
-
-def worker():
-    comfy.wait_ready()
-    while True:
-        mid = JOBS.get()
-        try:
-            if isinstance(mid, tuple):  # ("s", id): character studio job
-                process_studio(mid[1])
-            else:
-                process(mid)
-        except Exception as e:  # noqa: BLE001 - never let the worker die
-            if isinstance(mid, tuple):
-                studio.update(mid[1], status="failed", error=str(e)[:400])
-            else:
-                store.update(mid, status="failed", error=str(e)[:400])
+def _import_dirs():
+    for d in [x for x in os.environ.get("IMPORT_DIRS", "").split(":") if x]:
+        if Path(d).is_dir():
+            try:
+                media.import_folder(d)
+            except Exception as e:  # noqa: BLE001 - never block startup on an import
+                print(f"import {d} failed: {e}", flush=True)
 
 
 @asynccontextmanager
 async def lifespan(app):
-    store.init()
-    studio.init()
-    for mid in store.unfinished_ids():
-        store.update(mid, status="failed", error="interrupted by restart")
-    threading.Thread(target=worker, daemon=True).start()
+    db.init()
+    worker.start()
+    threading.Thread(target=_import_dirs, daemon=True).start()
     yield
 
 
@@ -100,434 +60,383 @@ app = FastAPI(lifespan=lifespan)
 
 
 @app.middleware("http")
-async def no_store_static(request, call_next):
-    # phones kept an old studio.js; static files are tiny, always fetch fresh
+async def cache_rules(request: Request, call_next):
     resp = await call_next(request)
-    if request.url.path.startswith("/static/"):
+    path = request.url.path
+    if path.startswith("/static/"):
+        # index.html asks for /static/x?v=<content hash>: safe to cache for ever; anything else must revalidate
+        resp.headers["Cache-Control"] = ("public, max-age=31536000, immutable" if request.query_params.get("v")
+                                         else "no-cache")
+    elif path.startswith("/api/") and "Cache-Control" not in resp.headers:
         resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC / "index.html"), headers={"Cache-Control": "no-store"})
+    html = (STATIC / "index.html").read_text().replace("{{v}}", VERSION)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
-@app.get("/api/info")
-def info():
-    stats = None
-    try:
-        stats = comfy._get("/system_stats", timeout=5)
-    except Exception:
-        pass
-    return {"models": [routing.MODEL], "label": routing.LABEL, "stats": stats}
+# ---------- live updates ----------
+@app.get("/api/wait")
+async def wait(since: int = -1):
+    """Long poll: returns as soon as anything changed (or after ~25 s)."""
+    loop = asyncio.get_running_loop()
+    rev = await loop.run_in_executor(None, db.wait, since, 25.0)
+    return {"rev": rev, "comfy": worker.STATUS["comfy"], "version": VERSION, "queue": _queue_count()}
 
 
-@app.get("/api/feed")
-def feed():
-    return store.feed()
+def _queue_count():
+    return db.one("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running')")["n"]
 
 
-@app.post("/api/messages")
-async def send(prompt: str = Form(...), shape: str = Form("tall"), seed: int = Form(0)):
-    prompt = prompt.strip()
-    if not prompt:
-        raise HTTPException(400, "empty prompt")
-    if seed == 0:
-        seed = int.from_bytes(os.urandom(4), "big")
-    plan = routing.plan(shape, seed)
-    plan["prefix"] = f"{SUB}/{int(time.time())}"
-    mid = store.add(prompt, "picture", "anime", None, plan)
-    JOBS.put(mid)
-    return {"id": mid, "plan": plan, "describe": routing.describe(plan)}
+# ---------- shapes / jobs ----------
+def _job_view(jid):
+    j = db.get("jobs", jid) if jid else None
+    if not j:
+        return None
+    out = {k: j[k] for k in ("id", "kind", "status", "progress", "total", "error", "image_id", "started", "finished")}
+    if j["status"] == "queued":
+        out["ahead"] = db.one("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running') AND id<?",
+                              (jid,))["n"]
+    if j["image_id"]:
+        img = db.get("images", j["image_id"])
+        out["w"], out["h"] = img["w"], img["h"]
+    return out
+
+
+@app.post("/api/jobs/{jid}/cancel")
+def cancel_job(jid: int):
+    if not db.get("jobs", jid):
+        raise HTTPException(404, "no such job")
+    worker.cancel(jid)
+    return {"ok": True}
+
+
+# ---------- chats ----------
+@app.get("/api/chats")
+def chats():
+    return db.query("SELECT c.*, (SELECT COUNT(*) FROM messages m WHERE m.chat_id=c.id) AS n "
+                    "FROM chats c ORDER BY c.id DESC LIMIT 200")
+
+
+@app.post("/api/chats")
+def new_chat():
+    cid = db.insert("chats", title="")
+    return db.get("chats", cid)
+
+
+def _msg_view(m):
+    return {**m, "job": _job_view(m["job_id"])}
+
+
+@app.get("/api/chats/{cid}")
+def chat(cid: int):
+    c = db.get("chats", cid)
+    if not c:
+        raise HTTPException(404, "no such chat")
+    msgs = db.query("SELECT * FROM messages WHERE chat_id=? ORDER BY id DESC LIMIT 200", (cid,))[::-1]
+    return {"chat": c, "messages": [_msg_view(m) for m in msgs]}
+
+
+def _ready_chars(slugs):
+    out = []
+    for s in (slugs or [])[:2]:
+        ch = db.one("SELECT * FROM characters WHERE slug=?", (s,))
+        if not ch or ch["status"] != "ready":
+            raise HTTPException(400, f"character '{s}' is not ready")
+        out.append(ch)
+    return out
+
+
+def _char_refs(ch):
+    """Two pictures per character for klein: the source + the closest reference."""
+    refs = [ch["source_image"]]
+    best = [r for r in (ch["refs"] or []) if r != ch["source_image"]]
+    if best:
+        refs.append(best[0])
+    else:
+        refs.append(ch["source_image"])
+    return refs
+
+
+def _chat_job(text, shape, chars, owner):
+    w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
+    if chars:
+        refs = [r for ch in chars for r in _char_refs(ch)]
+        cast = writer.cast_text([{"name": ch["name"]} for ch in chars])
+        prompt = (f"{cast} {text}. Keep each character's face, hair, body and outfit exactly as in the reference "
+                  f"pictures. {graphs.STYLE} No text, no letters, no speech bubbles.")
+        params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": worker.seed(), "refs": refs,
+                  "chars": [c["slug"] for c in chars]}
+    else:
+        params = {"prompt": text, "text": text, "w": w, "h": h, "seed": worker.seed()}
+    return worker.add_job("image", params, owner)
+
+
+@app.post("/api/chats/{cid}/messages")
+def send(cid: int, body: dict = Body(...)):
+    c = db.get("chats", cid)
+    if not c:
+        raise HTTPException(404, "no such chat")
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "empty message")
+    if len(text) > 2000:
+        raise HTTPException(400, "message too long (max 2000 characters)")
+    ckey = (body.get("ckey") or "")[:64] or None
+    if ckey:
+        old = db.one("SELECT * FROM messages WHERE ckey=?", (ckey,))
+        if old:  # the phone sent it twice (retry after a lost answer)
+            return _msg_view(old)
+    shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
+    chars = _ready_chars(body.get("chars"))
+    mid = db.insert("messages", chat_id=cid, text=text, shape=shape, chars=[ch["slug"] for ch in chars], ckey=ckey)
+    jid = _chat_job(text, shape, chars, f"msg:{mid}")
+    db.update("messages", mid, job_id=jid)
+    if not c["title"]:
+        db.update("chats", cid, title=text[:60])
+    return _msg_view(db.get("messages", mid))
 
 
 @app.post("/api/messages/{mid}/again")
-def again(mid: int, seed_mode: str = Form("new")):
-    msg = store.get(mid)
-    if msg is None:
+def again(mid: int):
+    m = db.get("messages", mid)
+    if not m:
         raise HTTPException(404, "no such message")
-    old = json.loads(msg["params"])
-    seed = old["seed"] if seed_mode == "same" else int.from_bytes(os.urandom(4), "big")
-    plan = routing.plan(old.get("shape", "tall"), seed)
-    plan["prefix"] = f"{SUB}/{int(time.time())}"
-    new_id = store.add(msg["prompt"], "picture", "anime", None, plan)
-    JOBS.put(new_id)
-    return {"id": new_id, "plan": plan, "describe": routing.describe(plan)}
+    chars = _ready_chars(m["chars"])
+    nid = db.insert("messages", chat_id=m["chat_id"], text=m["text"], shape=m["shape"], chars=m["chars"] or [])
+    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}")
+    db.update("messages", nid, job_id=jid)
+    return _msg_view(db.get("messages", nid))
 
 
-@app.post("/api/messages/{mid}/cancel")
-def cancel(mid: int):
-    if store.get(mid) is None:
-        raise HTTPException(404, "no such message")
-    with _cancel_lock:
-        CANCELLING.add(mid)
+# ---------- images / gallery ----------
+@app.get("/api/images")
+def images(before: str = "", limit: int = 60):
+    limit = max(1, min(limit, 200))
+    if before:
+        ts, _, iid = before.partition("_")
+        rows = db.query("SELECT id, ts, w, h, source FROM images WHERE (ts < ?) OR (ts = ? AND id < ?) "
+                        "ORDER BY ts DESC, id DESC LIMIT ?", (float(ts), float(ts), int(iid), limit))
+    else:
+        rows = db.query("SELECT id, ts, w, h, source FROM images ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
+    nxt = f"{rows[-1]['ts']!r}_{rows[-1]['id']}" if len(rows) == limit else None
+    total = db.one("SELECT COUNT(*) AS n FROM images")["n"]
+    return {"items": rows, "next": nxt, "total": total}
+
+
+@app.get("/api/images/{iid}")
+def image(iid: int, dl: int = 0):
+    try:
+        p, row = media.path(iid)
+    except FileNotFoundError:
+        raise HTTPException(404, "no such picture")
+    headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+    if dl:
+        headers["Content-Disposition"] = f'attachment; filename="manga-{iid}.png"'
+    return FileResponse(p, media_type="image/png", headers=headers)
+
+
+@app.get("/api/images/{iid}/info")
+def image_info(iid: int):
+    row = db.get("images", iid)
+    if not row:
+        raise HTTPException(404, "no such picture")
+    return {k: row[k] for k in ("id", "ts", "w", "h", "source", "prompt")}
+
+
+@app.get("/api/images/{iid}/thumb")
+def thumb(iid: int, s: str = "s"):
+    try:
+        p = media.thumb(iid, s if s in media.SIZES else "s")
+    except FileNotFoundError:
+        raise HTTPException(404, "no such picture")
+    return FileResponse(p, media_type="image/webp", headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+# ---------- characters ----------
+def _char_view(ch, full=False):
+    owner = f"char:{ch['id']}"
+    counts = {r["status"]: r["n"] for r in db.query(
+        "SELECT status, COUNT(*) AS n FROM jobs WHERE owner=? AND kind='charref' GROUP BY status", (owner,))}
+    out = {k: ch[k] for k in ("id", "slug", "name", "source_image", "status", "error", "ts")}
+    out["made"] = counts.get("done", 0)
+    out["planned"] = sum(counts.values())
+    out["refs"] = ch["refs"] or []
+    run = db.one("SELECT id, progress, total FROM jobs WHERE owner=? AND status='running'", (owner,))
+    out["step"] = run if run else None
+    if full:
+        out["scores"] = ch["scores"] or {}
+        made = db.query("SELECT image_id FROM jobs WHERE owner=? AND kind='charref' AND status='done' ORDER BY id",
+                        (owner,))
+        out["dropped"] = [r["image_id"] for r in made if r["image_id"] not in (ch["refs"] or [])] \
+            if ch["status"] == "ready" else []
+        out["all"] = [r["image_id"] for r in made]
+    return out
+
+
+@app.get("/api/characters")
+def characters():
+    return [_char_view(c) for c in db.query("SELECT * FROM characters ORDER BY id DESC")]
+
+
+@app.get("/api/characters/{cid}")
+def character(cid: int):
+    ch = db.get("characters", cid)
+    if not ch:
+        raise HTTPException(404, "no such character")
+    return _char_view(ch, full=True)
+
+
+def _slug(name):
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "character"
+    base, n = s, 2
+    while db.one("SELECT id FROM characters WHERE slug=?", (s,)):
+        s = f"{base}-{n}"
+        n += 1
+    return s
+
+
+@app.post("/api/characters")
+def make_character(body: dict = Body(...)):
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > 40:
+        raise HTTPException(400, "give the character a name (max 40 characters)")
+    iid = body.get("image_id")
+    if not isinstance(iid, int) or not db.get("images", iid):
+        raise HTTPException(404, "no such picture")
+    slug = _slug(name)
+    cid = db.insert("characters", slug=slug, name=name, source_image=iid, status="building", refs=[])
+    w, h = studio.SIZE
+    s = worker.seed()  # one seed for the whole set: same noise, only the instruction changes
+    for label, change in worker.char_plan():
+        worker.add_job("charref", {"prompt": studio.edit_prompt("klein9", change, ""), "src": iid, "w": w, "h": h,
+                                   "seed": s, "label": label}, f"char:{cid}")
+    return _char_view(db.get("characters", cid))
+
+
+@app.post("/api/characters/{cid}/cancel")
+def cancel_character(cid: int):
+    ch = db.get("characters", cid)
+    if not ch:
+        raise HTTPException(404, "no such character")
+    if ch["status"] in ("building", "checking"):
+        db.update("characters", cid, status="cancelled")
+        for j in db.query("SELECT id FROM jobs WHERE owner=? AND status IN ('queued','running')", (f"char:{cid}",)):
+            worker.cancel(j["id"])
     return {"ok": True}
 
 
-@app.post("/api/free")
-def free_gpu():
-    comfy.free()
-    return {"ok": True}
+@app.post("/api/characters/{cid}/retry")
+def retry_character(cid: int):
+    """A failed or stopped set: make the missing pictures again, then the face check."""
+    ch = db.get("characters", cid)
+    if not ch:
+        raise HTTPException(404, "no such character")
+    owner = f"char:{cid}"
+    if ch["status"] == "ready":  # run the face check again on the pictures already made
+        db.update("characters", cid, status="checking")
+        worker.add_job("charscore", {"char": cid}, owner)
+        return _char_view(db.get("characters", cid))
+    if ch["status"] not in ("failed", "cancelled"):
+        raise HTTPException(409, "this character is still being made")
+    redo = db.query("SELECT * FROM jobs WHERE owner=? AND kind='charref' AND status IN ('failed','cancelled')", (owner,))
+    db.update("characters", cid, status="building", error=None)
+    for j in redo:
+        p = j["params"]
+        p.pop("client_id", None)
+        worker.add_job("charref", p, owner)
+    if not redo:
+        last = db.one("SELECT * FROM jobs WHERE owner=? AND kind='charref' ORDER BY id DESC LIMIT 1", (owner,))
+        worker._after(last)
+    return _char_view(db.get("characters", cid))
 
 
+# ---------- pages ----------
+def _page_view(pg):
+    out = {k: pg[k] for k in ("id", "ts", "chars", "lines", "image_id", "status", "error", "writer")}
+    out["panels"] = [{**p, "job": _job_view(p.get("job_id"))} for p in pg["panels"]]
+    return out
+
+
+@app.get("/api/pages")
+def pages():
+    return [_page_view(p) for p in db.query("SELECT * FROM pages ORDER BY id DESC LIMIT 100")]
+
+
+@app.get("/api/pages/{pid}")
+def page(pid: int):
+    pg = db.get("pages", pid)
+    if not pg:
+        raise HTTPException(404, "no such page")
+    return _page_view(pg)
+
+
+def _panel_job(pid, idx, panel, chars):
+    w, h = graphs.fit_size(layout.aspects()[idx], 1.0)
+    params = {"prompt": panel["prompt"], "w": w, "h": h, "seed": worker.seed(), "page": pid, "idx": idx}
+    if "cast" in panel:
+        chars = [chars[i] for i in panel["cast"] if i < len(chars)]
+    if chars:
+        params["refs"] = [r for ch in chars for r in _char_refs(ch)]
+    return worker.add_job("panel", params, f"page:{pid}:{idx}")
+
+
+@app.post("/api/pages")
+def make_page(body: dict = Body(...)):
+    lines = [str(x).strip()[:400] for x in (body.get("lines") or [])]
+    if len(lines) != 4 or not all(lines):
+        raise HTTPException(400, "write one line for each of the 4 panels")
+    chars = _ready_chars(body.get("chars"))
+    prompts, quotes, casts, who = writer.write(lines, [{"name": c["name"]} for c in chars])
+    panels = [{"line": lines[i], "prompt": prompts[i], "quotes": quotes[i], "cast": casts[i]} for i in range(4)]
+    pid = db.insert("pages", chars=[c["slug"] for c in chars], lines=lines, panels=panels, status="working",
+                    writer=who)
+    for i in range(4):
+        panels[i]["job_id"] = _panel_job(pid, i, panels[i], chars)
+    db.update("pages", pid, panels=panels)
+    return _page_view(db.get("pages", pid))
+
+
+@app.post("/api/pages/{pid}/panels/{idx}/redo")
+def redo_panel(pid: int, idx: int):
+    pg = db.get("pages", pid)
+    if not pg or not 0 <= idx < 4:
+        raise HTTPException(404, "no such panel")
+    chars = _ready_chars(pg["chars"])
+    panels = pg["panels"]
+    old = panels[idx].get("job_id")
+    if old and db.get("jobs", old)["status"] in ("queued", "running"):
+        raise HTTPException(409, "this panel is still being made")
+    panels[idx]["job_id"] = _panel_job(pid, idx, panels[idx], chars)
+    db.update("pages", pid, panels=panels, status="working", error=None)
+    return _page_view(db.get("pages", pid))
+
+
+# ---------- GPU line ----------
 _gpu_cache = {"t": 0, "v": None}
 
 
 @app.get("/api/gpu")
 def gpu():
-    if time.time() - _gpu_cache["t"] > 1:
+    if time.time() - _gpu_cache["t"] > 2:
         try:
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name,utilization.gpu,temperature.gpu,memory.used,memory.total",
-                 "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5).stdout
-            row = [x.strip() for x in out.strip().splitlines()[0].split(",")]
-            _gpu_cache["v"] = {"name": row[0].replace("NVIDIA GeForce ", "").replace("RTX ", ""),
-                               "util": int(row[1]), "temp": int(row[2]),
-                               "used": int(row[3]), "total": int(row[4])}
+            out = subprocess.run(["nvidia-smi", "-i", "0", "--query-gpu=utilization.gpu,temperature.gpu,memory.used,"
+                                  "memory.total", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            u, t, used, tot = [int(x.strip()) for x in out.strip().splitlines()[0].split(",")]
+            _gpu_cache["v"] = {"util": u, "temp": t, "used": used, "total": tot}
         except Exception:
             _gpu_cache["v"] = None
         _gpu_cache["t"] = time.time()
-    if _gpu_cache["v"] is None:
-        raise HTTPException(503, "nvidia-smi not available")
-    return _gpu_cache["v"]
+    return _gpu_cache["v"]  # null when nvidia-smi is not available
 
 
-@app.get("/api/files/{path:path}")
-def files(path: str):
-    p = (OUTPUT / path).resolve()
-    if not str(p).startswith(str(OUTPUT.resolve()) + os.sep) or not p.is_file():
-        raise HTTPException(404, "no such file")
-    return FileResponse(p, headers={"Cache-Control": "no-store"})
-
-
-# ---------- Character studio (2026-10-24) ----------
-
-_family = {"v": "anima"}  # model family loaded last; free VRAM when it changes (klein 9B fills the card)
-
-
-def _studio_workflow(job, params, prefix):
-    kind = job["kind"]
-    w, h = params["width"], params["height"]
-    if kind == "t2i":
-        wf = workflows.anima(job["prompt"], w, h, params["seed"], prefix, workflows.NEG_BW)
-        return "anima", workflows.bw_finish(wf, ["9", 0], w, h, prefix)
-    if kind in ("i2i", "inpaint"):
-        src = studio.stage(params["src"])
-        mask = params.get("mask")
-        wf = workflows.anima_i2i(job["prompt"], src, w, h, params["seed"], prefix, params["denoise"], mask)
-        return "anima", workflows.bw_finish(wf, ["26", 0] if mask else ["9", 0], w, h, prefix)
-    if kind == "var":
-        src = studio.stage(params["src"])
-        if params["model"] == "klein9":
-            return "klein9", workflows.klein9_edit(job["prompt"], src, w, h, params["seed"], prefix)
-        if params["model"] == "qwen2511":
-            return "qwen2511", workflows.qwen2511_edit(job["prompt"], src, w, h, params["seed"], prefix)
-    if kind == "frame":
-        if params["method"] == "restyle":  # Anima img2img over a finished frame: keeps layout, gets Anima's ink look
-            src = studio.stage(params["src"])
-            wf = workflows.anima_i2i(job["prompt"], src, w, h, params["seed"], prefix, params["denoise"])
-            return "anima", workflows.bw_finish(wf, ["9", 0], w, h, prefix)
-        if params["method"] == "control":
-            ctrl = studio.stage(params["src"])
-            ref = studio.stage(params["ref"]) if params.get("ref") else None
-            return "anima", workflows.anima_control(job["prompt"], ctrl, w, h, params["seed"], prefix,
-                                                    params["ctrl_strength"], params["ctrl_end"], ref,
-                                                    params["ip_strength"], params.get("loras"),
-                                                    params.get("neg_extra", ""))
-        if params["method"] == "klein9":
-            refs = [studio.stage(f"manga/characters/{c}/character.png") for c in params["chars"]]
-            wf = workflows.klein9_refs(job["prompt"], refs, w, h, params["seed"], prefix)
-            return "klein9", workflows.bw_finish(wf, ["17", 0], w, h, prefix, save_id="18")
-        wf = workflows.anima(job["prompt"], w, h, params["seed"], prefix, workflows.NEG_BW)
-        return "anima", workflows.bw_finish(wf, ["9", 0], w, h, prefix)
-    raise RuntimeError(f"unknown studio job {kind}")
-
-
-def process_studio(jid):
-    job = studio.get(jid)
-    if job is None or job["status"] != "queued":
-        return
-    key = ("s", jid)
-    params = json.loads(job["params"])
-    studio.update(jid, status="running")
-    t0 = time.time()
-    try:
-        family, wf = _studio_workflow(job, params, f"{SUB}/studio/{job['batch']}_{jid}")
-        if family != _family["v"]:
-            comfy.free()
-            _family["v"] = family
-        t_run = time.time()
-        entry = comfy.run_job(wf, cancel_check=lambda: _is_cancelling(key),
-                              on_progress=lambda v, m: studio.update(jid, progress=v, total=m))
-        files = comfy.result_files(entry)
-        if not files:
-            raise RuntimeError("finished but produced no image")
-        sub, name = files[-1]
-        out = OUTPUT / sub / name
-        elapsed = time.time() - t0
-        if job["kind"] == "var":
-            rd = Path(params["run_dir"])
-            fname = f"{params['index']:02d}_{params['label']}.png"
-            shutil.copyfile(out, rd / fname)
-            studio.record_variation(rd, {"file": fname, "label": params["label"], "prompt": job["prompt"],
-                                         "seed": params["seed"], "seconds": round(elapsed, 1),
-                                         "gen_seconds": round(time.time() - t_run, 1)})
-            rel = f"manga/{(rd / fname).relative_to(studio.MANGA)}"
-        else:
-            dst = studio.MANGA / "work" / "out" / f"{job['batch']}_{jid}.png"
-            shutil.copyfile(out, dst)
-            rel = f"manga/work/out/{dst.name}"
-        studio.update(jid, status="done", filename=rel, elapsed=elapsed, progress=1, total=1)
-    except comfy.JobCancelled:
-        studio.update(jid, status="cancelled", elapsed=time.time() - t0)
-    except Exception as e:  # noqa: BLE001
-        studio.update(jid, status="failed", error=str(e)[:400], elapsed=time.time() - t0)
-    finally:
-        _clear_cancel(key)
-
-
-def _seed():
-    return int.from_bytes(os.urandom(4), "big")
-
-
-def _queue(batch, kind, prompt, params):
-    jid = studio.add(batch, kind, prompt, params)
-    JOBS.put(("s", jid))
-    return jid
-
-
-@app.post("/api/studio/grid")
-def studio_grid(prompt: str = Form(...), count: int = Form(16)):
-    prompt = prompt.strip()
-    if not prompt:
-        raise HTTPException(400, "empty prompt")
-    batch = studio.new_batch()
-    w, h = studio.SIZE
-    for _ in range(max(1, min(count, 16))):
-        _queue(batch, "t2i", prompt, {"seed": _seed(), "width": w, "height": h, "settings": studio.ANIMA_SETTINGS})
-    return {"batch": batch}
-
-
-def _src_info(src):
-    try:
-        studio.resolve(src)
-    except FileNotFoundError:
-        raise HTTPException(404, "no such picture")
-    return studio.meta_for(src)
-
-
-@app.post("/api/studio/more")
-def studio_more(src: str = Form(...), prompt: str = Form(...), denoise: float = Form(0.4), count: int = Form(4)):
-    meta = _src_info(src)
-    batch = studio.new_batch()
-    w, h = studio.SIZE
-    d = max(0.2, min(0.7, denoise))
-    for _ in range(max(1, min(count, 8))):
-        _queue(batch, "i2i", prompt.strip(), {"seed": _seed(), "width": w, "height": h, "src": src, "denoise": d,
-                                              "settings": studio.ANIMA_SETTINGS,
-                                              "parent": {"ref": src, "seed": meta.get("seed"), "kind": meta.get("kind")}})
-    return {"batch": batch}
-
-
-@app.post("/api/studio/inpaint")
-async def studio_inpaint(src: str = Form(...), prompt: str = Form(...), denoise: float = Form(0.6),
-                         count: int = Form(2), mask: UploadFile = File(...)):
-    meta = _src_info(src)
-    data = await mask.read()
-    if not data or len(data) > 8_000_000:
-        raise HTTPException(400, "bad mask")
-    batch = studio.new_batch()
-    w, h = studio.SIZE
-    d = max(0.2, min(1.0, denoise))
-    for _ in range(max(1, min(count, 4))):
-        mname = studio.stage_bytes(data)
-        _queue(batch, "inpaint", prompt.strip(), {"seed": _seed(), "width": w, "height": h, "src": src, "denoise": d,
-                                                  "mask": mname, "settings": studio.ANIMA_SETTINGS,
-                                                  "parent": {"ref": src, "seed": meta.get("seed"),
-                                                             "kind": meta.get("kind")}})
-    return {"batch": batch}
-
-
-@app.post("/api/studio/cancel")
-def studio_cancel(batch: str = Form(...)):
-    for jid in studio.batch_ids(batch):
-        job = studio.get(jid)
-        if job["status"] == "queued":
-            studio.update(jid, status="cancelled")
-        else:
-            with _cancel_lock:
-                CANCELLING.add(("s", jid))
-    return {"ok": True}
-
-
-@app.get("/api/studio/state")
-def studio_state():
-    return {"jobs": studio.jobs(), "kept": studio.kept_list(), "characters": studio.characters(),
-            "models": {k: {"label": v["label"], "ready": studio.model_ready(k)} for k, v in studio.EDIT_MODELS.items()},
-            "plan": len(studio.variation_plan())}
-
-
-@app.post("/api/studio/keep")
-def studio_keep(job: int = Form(...)):
-    try:
-        return {"ref": studio.keep(job)}
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/api/studio/hide")
-def studio_hide(ref: str = Form(...)):
-    try:
-        studio.hide(ref)
-    except FileNotFoundError:
-        raise HTTPException(404, "no such picture")
-    return {"ok": True}
-
-
-@app.post("/api/studio/save")
-def studio_save(ref: str = Form(...), name: str = Form(...), traits: str = Form("")):
-    _src_info(ref)
-    try:
-        return {"name": studio.save_character(ref, name, traits)}
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/api/studio/variations")
-def studio_variations(name: str = Form(...), model: str = Form("klein9"), seed: int = Form(0)):
-    if model not in studio.EDIT_MODELS:
-        raise HTTPException(400, "unknown model")
-    if not studio.model_ready(model):
-        raise HTTPException(400, f"{studio.EDIT_MODELS[model]['label']} files are not downloaded")
-    try:
-        rd, src, traits = studio.start_run(name, model)
-    except ValueError as e:
-        raise HTTPException(404, str(e))
-    seed = seed or _seed()  # one seed for the whole set: same noise, only the instruction changes
-    batch = studio.new_batch()
-    w, h = studio.SIZE
-    for i, (label, change) in enumerate(studio.variation_plan(), 1):
-        _queue(batch, "var", studio.edit_prompt(model, change, traits),
-               {"seed": seed, "width": w, "height": h, "src": src, "model": model, "label": label, "index": i,
-                "run_dir": str(rd)})
-    return {"batch": batch, "run": rd.name}
-
-
-@app.get("/api/studio/file/{ref:path}")
-def studio_file(ref: str):
-    try:
-        return FileResponse(studio.resolve(ref), headers={"Cache-Control": "no-store"})
-    except FileNotFoundError:
-        raise HTTPException(404, "no such file")
-
-
-@app.get("/api/frames/{project}")
-def frames_get(project: str):
-    try:
-        data = studio.frames_get(project)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    video = studio.MANGA / "frames" / project / "video.mp4"
-    return {**data, "shapes": studio.FRAME_SHAPES, "methods": studio.FRAME_METHODS,
-            "video": f"manga/frames/{project}/video.mp4" if video.is_file() else None}
-
-
-@app.post("/api/frames/{project}")
-async def frames_put(project: str, data: dict):
-    try:
-        return studio.frames_put(project, data)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.post("/api/frames/{project}/{line}/make")
-def frames_make(project: str, line: int, prompt: str = Form(...), shape: str = Form("wide"),
-                method: str = Form("anima"), chars: str = Form(""), count: int = Form(4)):
-    if shape not in studio.FRAME_SHAPES or method not in studio.FRAME_METHODS:
-        raise HTTPException(400, "bad shape or method")
-    names = [c for c in chars.split(",") if c]
-    for c in names:
-        if not (studio.MANGA / "characters" / c / "character.png").is_file():
-            raise HTTPException(400, f"no saved character '{c}'")
-    if method == "klein9" and not names:
-        raise HTTPException(400, "klein needs at least one saved character")
-    w, h = studio.FRAME_SHAPES[shape]
-    batch = studio.new_batch()
-    for _ in range(max(1, min(count, 8))):
-        _queue(batch, "frame", prompt.strip(), {"seed": _seed(), "width": w, "height": h, "shape": shape,
-                                                "method": method, "chars": names, "project": project, "line": line})
-    return {"batch": batch}
-
-
-@app.post("/api/frames/{project}/{line}/restyle")
-def frames_restyle(project: str, line: int, src: str = Form(...), prompt: str = Form(...),
-                   denoise: float = Form(0.4), count: int = Form(2)):
-    try:
-        p = studio.resolve(src)
-    except FileNotFoundError:
-        raise HTTPException(404, "no such picture")
-    w, h = _png_size(p)
-    batch = studio.new_batch()
-    for _ in range(max(1, min(count, 8))):
-        _queue(batch, "frame", prompt.strip(), {"seed": _seed(), "width": w, "height": h, "method": "restyle",
-                                                "src": src, "denoise": max(0.1, min(0.9, denoise)), "chars": [],
-                                                "project": project, "line": line})
-    return {"batch": batch}
-
-
-@app.post("/api/frames/{project}/{line}/control")
-def frames_control(project: str, line: int, src: str = Form(...), prompt: str = Form(...), ref: str = Form(""),
-                   ctrl_strength: float = Form(1.0), ctrl_end: float = Form(0.6), ip_strength: float = Form(0.7),
-                   count: int = Form(2), seed: int = Form(0), loras: str = Form(""), shape: str = Form(""),
-                   neg_extra: str = Form("")):
-    # loras: "file.safetensors:0.8,other.safetensors:0.5" (files in models/loras)
-    lora_list = []
-    for part in [x for x in loras.split(",") if x.strip()]:
-        name, _, st = part.strip().rpartition(":")
-        if not re.fullmatch(r"[\w.-]+\.safetensors", name):
-            raise HTTPException(400, f"bad lora: {part}")
-        lora_list.append((name, float(st)))
-    for r in [src] + ([ref] if ref else []):
-        try:
-            studio.resolve(r)
-        except FileNotFoundError:
-            raise HTTPException(404, f"no such picture: {r}")
-    w, h = studio.FRAME_SHAPES[shape] if shape in studio.FRAME_SHAPES else _png_size(studio.resolve(src))
-    w, h = w // 16 * 16, h // 16 * 16
-    batch = studio.new_batch()
-    for i in range(max(1, min(count, 8))):
-        _queue(batch, "frame", prompt.strip(), {"seed": (seed + i) if seed else _seed(), "width": w, "height": h,
-                                                "method": "control", "src": src, "ref": ref,
-                                                "ctrl_strength": ctrl_strength, "ctrl_end": ctrl_end,
-                                                "ip_strength": ip_strength, "loras": lora_list, "neg_extra": neg_extra[:400], "chars": [],
-                                                "project": project,
-                                                "line": line})
-    return {"batch": batch}
-
-
-def _png_size(p):
-    with open(p, "rb") as f:
-        head = f.read(24)
-    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
-
-
-@app.post("/api/frames/{project}/{line}/pick")
-def frames_pick(project: str, line: int, job: int = Form(...), slot: str = Form("")):
-    if slot and not studio.NAME_RE.match(slot):
-        raise HTTPException(400, "bad slot")
-    try:
-        return studio.frame_pick(project, line, job, slot)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@app.get("/demo")
-def demo_page():
-    return FileResponse(str(STATIC / "demo.html"), headers={"Cache-Control": "no-store"})
-
-
-@app.get("/studio")
-def studio_page():
-    return FileResponse(str(STATIC / "studio.html"), headers={"Cache-Control": "no-store"})
+@app.get("/healthz")
+def healthz():
+    return Response("ok")

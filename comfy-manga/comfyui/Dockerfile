@@ -12,3 +12,8 @@ RUN git clone -q https://github.com/LuciferTC9527/ComfyUI-Anima_IP-Adapter && \
 RUN git clone -q https://github.com/Mirumo0u0/ComfyUI-Cosmos-Reference && \
     git -C ComfyUI-Cosmos-Reference checkout -q 6fd6b27e7c72847d69ad74f4c9cb68ce91b319df
 WORKDIR /app/ComfyUI
+# manga app (2026-10-24): face-similarity check for character sets. OpenCV headless (no deps: numpy is already in
+# the image) + nagadomi's anime-face cascade (MIT), pinned commit; node code in nodes/manga_score.
+RUN pip install --no-cache-dir --no-deps opencv-python-headless==4.14.0.94
+COPY --chmod=755 nodes/manga_score /app/ComfyUI/custom_nodes/manga_score
+ADD --chmod=644 https://raw.githubusercontent.com/nagadomi/lbpcascade_animeface/4433ab1ae1166ea75acfe99eb0f18709dac329a0/lbpcascade_animeface.xml /app/ComfyUI/custom_nodes/manga_score/lbpcascade_animeface.xml

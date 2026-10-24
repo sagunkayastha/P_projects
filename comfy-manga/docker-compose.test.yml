@@ -1,0 +1,27 @@
+# Test instance of the app on :8290 with its own data folder; uses the running comfyui-manga container.
+#   APP_IMAGE=local/comfymanga:test TEST_DATA=~/scratch/mangaapp/testdata docker compose -f docker-compose.test.yml up -d
+name: comfy-manga-test
+services:
+  app:
+    image: ${APP_IMAGE:-local/comfymanga:test}
+    container_name: manga-app-test
+    user: "1000:1000"
+    ports:
+      - "127.0.0.1:8290:8189"
+      - "192.168.0.235:8290:8189"
+    environment:
+      - COMFY_URL=http://comfyui-manga:8188
+      - APP_DIR=/data/manga/app
+      - LLM_URL=http://host.docker.internal:11434
+      - TZ=America/Denver
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ${TEST_DATA:?set TEST_DATA}:/data/manga
+    networks: [manga]
+    logging: {driver: local}
+    restart: "no"
+networks:
+  manga:
+    name: comfy-manga_default
+    external: true

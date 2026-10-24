@@ -36,18 +36,14 @@ services:
       - "192.168.0.235:8289:8189"   # home LAN (phone); no auth, home Wi-Fi only
     environment:
       - COMFY_URL=http://comfyui-manga:8188
-      - OUTPUT_DIR=/data/output
-      - CHAT_SUBDIR=manga
-      - MANGA_DIR=/data/manga
-      - INPUT_DIR=/data/input
-      - MODELS_DIR=/models
+      - APP_DIR=/data/manga/app                          # everything the app makes: SQLite + pictures (on disk)
+      - IMPORT_DIRS=/data/manga/ram-backup-2026-10-24    # copied (read only) into the gallery once
+      - LLM_URL=http://host.docker.internal:11434        # local llama.cpp router, used only if a model is loaded
       - TZ=America/Denver
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - ./output:/data/output
-      - manga_out:/data/output/manga   # results stay in RAM until saved/downloaded
-      - manga_in:/data/input
-      - ${HOME}/Documents/Personal/manga:/data/manga   # character studio: kept pictures, characters (mode 700)
-      - ./models:/models:ro                            # only to check which edit models are downloaded
+      - ${HOME}/Documents/Personal/manga:/data/manga   # mode 700
     deploy:
       resources:
         reservations:
@@ -55,9 +51,7 @@ services:
             - driver: nvidia
               count: all
               capabilities: [utility]   # nvidia-smi for the GPU line only
-    tmpfs:
-      - /data:size=64m,mode=0700,uid=1000,gid=1000     # app history (SQLite) in RAM
-    logging: {driver: none}
+    logging: {driver: local}
     depends_on:
       - comfyui
     restart: "no"
