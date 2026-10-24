@@ -228,6 +228,12 @@ def _studio_workflow(job, params, prefix):
             src = studio.stage(params["src"])
             wf = workflows.anima_i2i(job["prompt"], src, w, h, params["seed"], prefix, params["denoise"])
             return "anima", workflows.bw_finish(wf, ["9", 0], w, h, prefix)
+        if params["method"] == "control":
+            ctrl = studio.stage(params["src"])
+            ref = studio.stage(params["ref"]) if params.get("ref") else None
+            return "anima", workflows.anima_control(job["prompt"], ctrl, w, h, params["seed"], prefix,
+                                                    params["ctrl_strength"], params["ctrl_end"], ref,
+                                                    params["ip_strength"])
         if params["method"] == "klein9":
             refs = [studio.stage(f"manga/characters/{c}/character.png") for c in params["chars"]]
             wf = workflows.klein9_refs(job["prompt"], refs, w, h, params["seed"], prefix)
@@ -466,6 +472,27 @@ def frames_restyle(project: str, line: int, src: str = Form(...), prompt: str = 
         _queue(batch, "frame", prompt.strip(), {"seed": _seed(), "width": w, "height": h, "method": "restyle",
                                                 "src": src, "denoise": max(0.1, min(0.9, denoise)), "chars": [],
                                                 "project": project, "line": line})
+    return {"batch": batch}
+
+
+@app.post("/api/frames/{project}/{line}/control")
+def frames_control(project: str, line: int, src: str = Form(...), prompt: str = Form(...), ref: str = Form(""),
+                   ctrl_strength: float = Form(1.0), ctrl_end: float = Form(0.6), ip_strength: float = Form(0.7),
+                   count: int = Form(2), seed: int = Form(0)):
+    for r in [src] + ([ref] if ref else []):
+        try:
+            studio.resolve(r)
+        except FileNotFoundError:
+            raise HTTPException(404, f"no such picture: {r}")
+    w, h = _png_size(studio.resolve(src))
+    w, h = w // 16 * 16, h // 16 * 16
+    batch = studio.new_batch()
+    for i in range(max(1, min(count, 8))):
+        _queue(batch, "frame", prompt.strip(), {"seed": (seed + i) if seed else _seed(), "width": w, "height": h,
+                                                "method": "control", "src": src, "ref": ref,
+                                                "ctrl_strength": ctrl_strength, "ctrl_end": ctrl_end,
+                                                "ip_strength": ip_strength, "chars": [], "project": project,
+                                                "line": line})
     return {"batch": batch}
 
 

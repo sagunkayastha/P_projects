@@ -5,7 +5,7 @@ Prompt prefix and sampler settings are the ones measured on this PC (32 steps, c
 
 NEG = ("worst quality, low quality, artist name, blurry, jpeg artifacts, chromatic aberration")
 # Studio (B/W manga characters): Anima still paints well-known outfits in their colours (spot colour) unless told not to.
-NEG_BW = NEG + ", nsfw, bottomless, color, colored, spot color, limited palette, orange, blue, red, yellow"
+NEG_BW = NEG + ", nsfw, nude, naked, topless, bottomless, kiss, yuri, color, colored, spot color, limited palette, orange, blue, red, yellow"
 
 
 def _save(prefix, ref):
@@ -121,3 +121,28 @@ def klein9_refs(prompt, images, w, h, seed, prefix):
     wf["15"]["inputs"]["positive"] = pos
     wf["15"]["inputs"]["negative"] = neg
     return wf
+
+
+def anima_control(prompt, control, w, h, seed, prefix, ctrl_strength=1.0, ctrl_end=0.6, ref=None, ip_strength=0.7):
+    """Anima draws the frame itself (real manga linework); a finished picture (e.g. a klein frame) steers the
+    layout through kohya's ControlNet-LLLite 'any-test like v2' (greyscale/lineart control), and a saved
+    character picture steers identity through the Anima IP-Adapter (SigLIP2). Nodes pinned in comfyui/Dockerfile."""
+    wf = anima(prompt, w, h, seed, prefix, NEG_BW)
+    wf["30"] = {"class_type": "LoadImage", "inputs": {"image": control}}
+    wf["31"] = {"class_type": "ImageScale", "inputs": {"image": ["30", 0], "upscale_method": "lanczos",
+                "width": w, "height": h, "crop": "center"}}
+    wf["32"] = {"class_type": "AnimaLLLiteApply_sdscripts", "inputs": {
+        "model": ["1", 0], "lllite_name": "anima-lllite-any-test-like-v2.safetensors", "image": ["31", 0],
+        "strength": ctrl_strength, "start_percent": 0.0, "end_percent": ctrl_end, "preserve_wrapper": True}}
+    model = ["32", 0]
+    if ref and ip_strength > 0:
+        wf["33"] = {"class_type": "LoadImage", "inputs": {"image": ref}}
+        wf["34"] = {"class_type": "AnimaIPAdapterLoader", "inputs": {
+            "ip_adapter_name": "ip_adapter-Character_Reference-10.safetensors", "auto_download": False}}
+        wf["35"] = {"class_type": "AnimaIPAdapterApply", "inputs": {
+            "model": model, "ip_adapter": ["34", 0], "ref_image": ["33", 0], "strength": ip_strength,
+            "ref_image_size": 512, "siglip_layer": -1, "ip_cfg_scale": 4.0, "ip_cfg_separate": False,
+            "gray_null": False, "use_lora": True}}
+        model = ["35", 0]
+    wf["8"]["inputs"]["model"] = model
+    return bw_finish(wf, ["9", 0], w, h, prefix)

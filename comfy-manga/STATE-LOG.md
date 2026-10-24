@@ -1,5 +1,11 @@
 # comfy-manga — STATE-LOG (newest first)
 
+## 2026-10-24 03:20 — Anima-drawn frames (rem-manga)
+- Read + pinned 3 nodes (LLLite, IP-Adapter, Cosmos-Reference) into local/comfyui-manga:cu130; weights ~2 GB.
+- Tests (same seed): IP-Adapter fixes Haze (hair/mask) but breaks Rem; control 1.0/end 0.6 keeps layout with Anima linework.
+- Line 1 at control end 0.6 drew two nude women kissing (not shown); fixed with control 1.2 to the end + outfit tags
+  + nudity/kiss negatives. Final F frames: jobs 247, 235, 256, 245. /demo shows F on top, old variants below.
+
 ## 2026-10-24 02:45 — restyle test, video prep, research (rem-manga)
 - Frames restyle endpoint (/api/frames/<p>/<line>/restyle) + per-line variants and final; /demo shows final
   frames + comparison row (klein, A-E). E (klein + MangaScreen finish without Levels) won my test; user: "just

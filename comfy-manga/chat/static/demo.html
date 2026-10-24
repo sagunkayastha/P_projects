@@ -17,7 +17,7 @@
   .note { color: #999; font-size: 14px; margin: 0 0 18px; }
   .cmp { margin: 0 0 28px; }
   .cmp .t { font-size: 15px; margin-bottom: 8px; }
-  .row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; align-items: start; }
+  .row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; align-items: start; }
   .row div { font-size: 12px; color: #aaa; text-align: center; }
   .row div img { margin-bottom: 4px; }
   .row .win { color: #8fd18f; }
@@ -53,8 +53,9 @@ fetch(`/api/frames/${encodeURIComponent(project)}`).then((r) => r.json()).then((
   if (!lines.some((l) => l.variants)) return;
   m.appendChild(el("h2", null, "Style comparison"));
   m.appendChild(el("p", "note", "klein = first pick · A = Anima redraw (img2img 0.38) · B = A + MangaScreen finish · " +
-    "C = klein with a strong ink prompt · D = klein + MangaScreen Manga-Lite · E = klein + MangaScreen finish " +
-    "without the Levels step (used above: keeps Haze's dark skin as a tone). Line 1 B-E start from a re-drawn klein frame (ink street)."));
+    "C = klein with a strong ink prompt · D = klein + MangaScreen Manga-Lite · E = klein + MangaScreen finish (old pick) · " +
+    "F = NEW, used above: Anima Manga draws the frame itself; the klein frame only steers the layout (ControlNet-LLLite) " +
+    "and the saved Haze picture steers her look (IP-Adapter)."));
   for (const l of lines) {
     const box = el("div", "cmp"); box.appendChild(el("div", "t", l.text || ""));
     const row = el("div", "row");

@@ -4,7 +4,8 @@ name: comfy-manga
 # Ports: ComfyUI :8288 (localhost only), app :8289 (localhost + home LAN).
 services:
   comfyui:
-    image: local/comfyui:cu130
+    build: ./comfyui
+    image: local/comfyui-manga:cu130   # shared cu130 image + pinned Anima nodes (comfyui/Dockerfile)
     container_name: comfyui-manga
     ports:
       - "127.0.0.1:8288:8188"
