@@ -1,5 +1,5 @@
 # comfy-manga — STATE
-Updated: 2026-10-24 06:10 (MDT) · by rem-mangaapp (Claude, PC laanta-chy)
+Updated: 2026-10-24 18:00 (MDT) · by rem-mangafix (Claude, PC laanta-chy)
 
 ## Goal
 Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU 0): chat -> pictures,
@@ -27,13 +27,16 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
 - Not tested on the real Samsung: no phone on USB/adb. (192.168.0.179:5555 = AT&T TV box, left alone.)
 
 ## Next
-1. User: try it on the phone (http://192.168.0.235:8289). To let an agent test on the Samsung: enable USB
-   debugging (or wireless debugging + pair) once.
-2. Manga look research (parked, see STATE-LOG 03:55): pictures are clean klein/Anima renders, not real manga ink.
-3. Optional: per-panel prompt edit before redo; delete/hide in gallery (nothing deletes today).
+1. Deploy (waiting on the user's go via Rem: recreating manga-app wipes the private RAM session):
+   `docker compose -f docker-compose.yml -f docker-compose.private.yml up -d --build app`. Code in commits
+   0dc2e42 (phase A, chat tools, cache, phase B behind MANGA_B=0) + c63f417 (Director tab, manga-gpu helper).
+2. When the GPU is allowed again: 8B director bench (tests/bench_director.py; 3060 container, CPU, vs qwen36),
+   phase B tests + numbers (tests/bench_consistency.py; B1 so far: Nori face-sim 0.929 -> 0.940, faces found
+   only 6/12 and 4/12; Bram: no face detected at all, whole-sim 0.850 -> 0.850), then MANGA_B=1.
+3. Phone test on the Samsung (ask Rem first). Private / Continue choice at start (user request, not built).
 
 ## Blockers / waiting on
-- Real-device test waits on the user enabling debugging on the Samsung.
+- User's go for the deploy; GPU use paused by user order (2026-10-24 ~17:30) until Rem says the GPUs are free.
 
 ## Decisions
 - 2026-10-24: one app at / (chat, gallery, characters, page). Old /studio and /demo routes removed from app.py
@@ -46,7 +49,17 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
 - Character ranking: drifted = face sim < set median - 0.15; outfits always kept unless drifted (whole-picture
   similarity punishes new clothes). Heuristic; no real "other person" case seen yet in tests.
 
+- 2026-10-24: phase B (angle-matched refs, trait list, source floor + best-of-2 views, review grid before
+  save) ships behind MANGA_B (0 in docker-compose.yml) until measured; old behaviour when off.
+- 2026-10-24: the app reaches the host only through manga-gpu (host/README.md): fixed verbs, SSH forced command,
+  key in ~/.config/manga-gpu (never in git). The llama.cpp router listens on 127.0.0.1 only, so LLM calls are relayed.
+- 2026-10-24: Director = chat with the local LLM, system prompt chat/director-skills.md (user copy in APP_DIR
+  overrides); LLM up stops comfyui-manga (both need the 5070 Ti), LLM down starts it again.
+
 ## Gotchas / do-not
+- The user may be working in the PRIVATE session (RAM only): never restart/recreate manga-app or comfyui-manga,
+  and never queue test jobs on comfyui-manga, without asking Rem. Test instances share comfyui-manga's queue
+  (docker-compose.test.yml): for UI tests without GPU use the isolated setup (mock LLM, COMFY_URL=nowhere, see log).
 - One ComfyUI stack on GPU 0 at a time: stop ../comfyui (comfyui + chat) before starting this one (klein fills 16 GB).
 - Never delete in ~/Documents/Personal/manga. Never look at the user's own pictures (ram-backup, gallery):
   tests use the test instance with its own data (~/scratch/mangaapp/testdata).
@@ -63,6 +76,9 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
   `docker compose stop app && docker tag local/comfymanga:pre-app-20261024 local/comfymanga:latest &&
   docker tag local/comfyui-manga:cu130-pre-app-20261024 local/comfyui-manga:cu130 &&
   git show 0300075:comfy-manga/docker-compose.yml > docker-compose.yml && docker compose up -d --no-build --force-recreate`
+- manga-gpu: `manga-gpu status` on the host; log ~/.cache/manga-gpu/actions.log.
+- Flows for this work: tests/fix_flows.py (page | review | director), tests/mock_llm.py, bench_consistency.py,
+  bench_director.py. Shots: ~/scratch/mangafix/shots{A,D2,C}.
 - Code (chat/): app.py (API), worker.py (job loop, characters, pages), db.py (SQLite + revision/long poll),
   comfy.py (ComfyUI client), graphs.py (graphs on workflows.py), layout.py (page + bubbles), writer.py (panel
   prompts), media.py (files, thumbs, import), static/{index.html,app.js,app.css}. ComfyUI node:

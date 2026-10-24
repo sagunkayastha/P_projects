@@ -1,5 +1,20 @@
 # comfy-manga — STATE-LOG (newest first)
 
+
+## 2026-10-24 (eve) — per-panel fix, chat tools, Director tab built; deploy waits on the user ⚠️ (rem-mangafix)
+- Phase A (commit 0dc2e42): per-panel Redo/Edit (line + cast), versions kept + pickable, page re-composed;
+  no-character sheet; user shot words beat default framing; letterbox trim; panel face check (MangaRefScore)
+  with one auto-redo + warning; LLM writer spelling fix. Flow test with ComfyUI 12/15 (3 test bugs, fixed).
+- Chat: Copy prompt / Edit / Try again (new or same seed), like the ComfyUI image chat. Cache: no-store for all
+  but hashed assets; picture URLs carry a per-store key (fresh private store reuses ids -> phone showed old pictures).
+- Phase B code (refs.py, traits, floors 0.85 face / 0.90 whole / 0.80 outfit, best-of-2, review grid) behind
+  MANGA_B. B1 bench (6 lines x 2 seeds): Nori face-sim 0.929 -> 0.940 (faces found 6/12 vs 4/12), Bram no faces
+  found (whole 0.850 vs 0.850): the anime face cascade misses most panels; better metric needed.
+- Director (c63f417): chat + editable shot list + Send to Make page (+ scene bible field); manga-gpu host helper
+  installed (symlink, key, authorized_keys line; backup authorized_keys.bak-20261024-mangagpu). Mock-LLM UI test 6/6.
+- My test instance used the shared comfyui-manga while the user worked (slowed them); stopped on user order,
+  as was the 8B director test on the 3060 (container had already exited). Image backup local/comfymanga:pre-fix-20261024b.
+
 ## 2026-10-24 06:10 — new mobile-first app: chat, gallery, characters, pages (rem-mangaapp, overnight)
 - Rewrote chat/app.py around an on-disk SQLite job table + worker (re-attach after app restart, re-send after
   ComfyUI restart; both tested mid-job). All output in ~/Documents/Personal/manga/app.
