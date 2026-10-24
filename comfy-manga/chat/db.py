@@ -16,6 +16,7 @@ _lock = threading.RLock()
 _conn = None
 _cond = threading.Condition()
 _rev = 0
+STORE = ""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chats (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, title TEXT);
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS characters (id INTEGER PRIMARY KEY AUTOINCREMENT, ts 
     name TEXT, source_image INTEGER, status TEXT, refs TEXT, scores TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS pages (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, chars TEXT, lines TEXT,
     panels TEXT, image_id INTEGER, status TEXT, error TEXT, writer TEXT);
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS msg_chat ON messages(chat_id);
 """
@@ -48,6 +50,14 @@ def init():
     _conn.row_factory = sqlite3.Row
     _conn.execute("PRAGMA journal_mode=WAL")
     _conn.executescript(SCHEMA)
+    # a random id per store: picture URLs carry it, so a phone never shows a cached picture of another store
+    # (picture ids start at 1 again in a fresh private store)
+    _conn.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('store', lower(hex(randomblob(6))))")
+    global STORE
+    STORE = _conn.execute("SELECT v FROM meta WHERE k='store'").fetchone()[0]
+    cols = {r[1] for r in _conn.execute("PRAGMA table_info(characters)")}
+    if "traits" not in cols:  # added 2026-10-24: the character's looks in words
+        _conn.execute("ALTER TABLE characters ADD COLUMN traits TEXT")
 
 
 def _row(r):

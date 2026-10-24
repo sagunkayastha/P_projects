@@ -1,0 +1,18 @@
+# Private mode (user, 2026-10-24): a CLEAN session like an incognito window.
+# Start:  docker compose -f docker-compose.yml -f docker-compose.private.yml up -d app
+# Normal: docker compose up -d app   (recreates the container with the on-disk store)
+# The on-disk store is NOT mounted at all: no old chats, pictures, pages or characters are visible,
+# and everything new lives in RAM only and is gone when the container stops. Nothing is logged.
+services:
+  app:
+    volumes: !override
+      - manga_priv:/data/manga
+    environment:
+      - APP_DIR=/data/manga/app
+      - IMPORT_DIRS=
+    command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8189", "--no-access-log"]
+    logging: {driver: none}
+volumes:
+  manga_priv:
+    driver: local
+    driver_opts: {type: tmpfs, device: tmpfs, o: "size=3g,uid=1000,gid=1000,mode=0700"}

@@ -21,8 +21,8 @@ function el(tag, attrs, ...kids) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
-const imgUrl = (id) => `/api/images/${id}`;
-const thumbUrl = (id, s) => `/api/images/${id}/thumb${s ? "?s=" + s : ""}`;
+const imgUrl = (id) => `/api/images/${id}?k=${window.STORE}`;  // k: this store (ids repeat across stores)
+const thumbUrl = (id, s) => `/api/images/${id}/thumb?k=${window.STORE}${s ? "&s=" + s : ""}`;
 
 async function api(method, url, body) {
   const ctl = new AbortController();
@@ -220,19 +220,24 @@ function renderMsg(m) {
     const img = el("img", { src: thumbUrl(j.image_id, "m"), alt: m.text, width: j.w, height: j.h, loading: "lazy" });
     img.addEventListener("click", () => { const L = chatImages(); openViewer(L, L.findIndex((x) => x.id === j.image_id)); });
     res.append(img, el("div", { class: "acts" },
-      el("a", { class: "btn", href: imgUrl(j.image_id) + "?dl=1", download: "" }, "⬇ Save"),
-      el("button", { class: "btn", onclick: () => again_(m.id) }, "↻ Again"),
-      el("button", { class: "btn star", onclick: () => makeCharSheet(j.image_id) }, "★ Make character")));
+      el("a", { class: "btn", href: imgUrl(j.image_id) + "&dl=1", download: "" }, "⬇ Save"),
+      el("button", { class: "btn star", onclick: () => makeCharSheet(j.image_id) }, "★ Make character")),
+      el("div", { class: "retry" }, "Try again:",
+        el("button", { class: "btn", onclick: () => again_(m.id, "new") }, "New seed"),
+        el("button", { class: "btn", onclick: () => again_(m.id, "same") }, "Same seed")));
   } else {
     const ar = m.shape === "wide" ? 1.75 : m.shape === "square" ? 1 : 0.68;
     if (j && (j.status === "queued" || j.status === "running")) res.append(el("div", { class: "ph", style: `--ar:${ar}` }, "✎"));
     res.append(jobStatus(j));
     const acts = el("div", { class: "acts" });
     if (j && (j.status === "queued" || j.status === "running")) acts.append(el("button", { class: "btn danger", onclick: () => stopJob(j.id) }, "■ Stop"));
-    if (j && (j.status === "failed" || j.status === "cancelled")) acts.append(el("button", { class: "btn", onclick: () => again_(m.id) }, "↻ Try again"));
+    if (j && (j.status === "failed" || j.status === "cancelled")) acts.append(el("button", { class: "btn", onclick: () => again_(m.id, "new") }, "↻ Try again"));
     if (acts.childNodes.length) res.append(acts);
   }
-  return el("div", { class: "msg", "data-id": m.id }, el("div", { class: "me" }, m.text, who), res);
+  const line = el("div", { class: "me" }, m.text, who);
+  const cp = el("button", { class: "btn small", onclick: () => copyText(m.text, cp, line) }, "Copy prompt");
+  const tools = el("div", { class: "msgtools" }, cp, el("button", { class: "btn small", onclick: () => editMsg(m) }, "Edit"));
+  return el("div", { class: "msg", "data-id": m.id }, line, tools, res);
 }
 
 function renderPending(key, p) {
@@ -299,9 +304,37 @@ async function sendPending(key) {
     p.state = "failed"; p.error = e.message; renderChat();
   }
 }
-async function again_(mid) {
-  try { await api("POST", `/api/messages/${mid}/again`); log.scrollTop = log.scrollHeight; refresh(); }
+// Copy: the LAN page is plain http, where navigator.clipboard is missing (iPhone Safari) -> hidden textarea +
+// execCommand("copy"); if even that fails, select the prompt text so the user can copy it by hand.
+function copyText(t, btn, node) {
+  const done = (ok) => {
+    if (ok) { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy prompt"; }, 1500); return; }
+    const r = document.createRange(); r.selectNodeContents(node);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    btn.textContent = "Selected - copy it";
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(() => done(true), () => done(legacyCopy(t)));
+  else done(legacyCopy(t));
+}
+function legacyCopy(t) {
+  const ta = el("textarea", { readonly: true, style: "position:fixed;top:0;left:0;opacity:0;font-size:16px" });
+  ta.value = t; document.body.append(ta);
+  ta.focus(); ta.select(); ta.setSelectionRange(0, t.length);
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  ta.remove();
+  return ok;
+}
+async function again_(mid, seed) {
+  try { await api("POST", `/api/messages/${mid}/again`, { seed: seed || "new" }); log.scrollTop = log.scrollHeight; refresh(); }
   catch (e) { toast(e.message, { err: true }); }
+}
+function editMsg(m) {  // put this message back in the box to change it; sending makes one new picture
+  text.value = m.text; LS.set("manga-draft", text.value); autosize();
+  state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars); paintChips();
+  if (m.shape) { state.shape = m.shape; LS.set("manga-shape", state.shape); paintChips(); }
+  text.focus(); text.setSelectionRange(text.value.length, text.value.length);
+  toast("Change the text, then ➤ to draw it again");
 }
 async function stopJob(jid) {
   try { await api("POST", `/api/jobs/${jid}/cancel`); refresh(); } catch (e) { toast(e.message, { err: true }); }
@@ -390,7 +423,7 @@ function paintViewer() {
   strip.style.transform = "translateX(-100vw)";
   const it = V.list[V.idx];
   $("#vcount").textContent = `${V.idx + 1} / ${V.list === G.items && G.total ? G.total : V.list.length}`;
-  $("#vdl").href = imgUrl(it.id) + "?dl=1";
+  $("#vdl").href = imgUrl(it.id) + "&dl=1";
   $("#vchar").hidden = it.source === "page";
   if (V.more && V.idx > V.list.length - 6) V.more().then(() => { if (!$("#viewer").hidden) slides[2].replaceChildren(slideImg(2) || ""); });
 }
@@ -533,6 +566,7 @@ function charLine(c) {
   if (c.status === "building") return `making pictures · ${c.made} / ${c.planned}`;
   if (c.status === "checking") return "checking faces…";
   if (c.status === "ready") return `ready · ${c.refs.length} pictures`;
+  if (c.status === "review") return "made · check the pictures, then Save";
   if (c.status === "cancelled") return "stopped";
   return "failed: " + (c.error || "unknown");
 }
@@ -555,30 +589,78 @@ async function loadChars() {
         el("button", { class: "btn", onclick: () => go("char", c.id) }, "Open"),
         c.status === "ready" ? el("button", { class: "btn", onclick: () => useInChat(c) }, "💬 Use in chat") : null,
         c.status === "ready" ? el("button", { class: "btn", onclick: () => pageWith(c) }, "📖 Make page") : null,
+        c.status === "review" ? el("button", { class: "btn star", onclick: () => go("char", c.id) }, "✓ Check & save") : null,
         busyC ? el("button", { class: "btn danger", onclick: () => api("POST", `/api/characters/${c.id}/cancel`).then(refresh) }, "■ Stop") : null,
         c.status === "failed" || c.status === "cancelled" ? el("button", { class: "btn", onclick: () => api("POST", `/api/characters/${c.id}/retry`).then(refresh).catch((e) => toast(e.message, { err: true })) }, "↻ Retry") : null));
   }));
 }
 function useInChat(c) { state.chars = [c.slug]; LS.set("manga-chars", state.chars); paintChips(); go("chat"); }
 function pageWith(c) { pageSel = new Set([c.slug]); go("page"); }
+const review = {};  // character id -> {keep:Set, traits:string} while the user is checking a new set
 async function loadChar(id) {
   const c = await api("GET", `/api/characters/${id}`);
   charCache[id] = c;
   $("#title").textContent = c.name;
   const box = $("#chardetail");
+  const ae = document.activeElement;
+  if (ae && ae.tagName === "TEXTAREA" && box.contains(ae) && ae.dataset.cid === String(id)) return;  // typing: no repaint
+  if (c.status === "review") return box.replaceChildren(reviewCard(c));
   const refs = c.refs.map((i) => ({ id: i }));
   const dropped = (c.dropped || []).map((i) => ({ id: i }));
   const all = (c.status === "ready" ? refs : (c.all || []).map((i) => ({ id: i })));
   const gridOf = (L, cls) => el("div", { class: "refs " + (cls || "") }, L.map((it, k) => el("button", { onclick: () => openViewer(L, k) },
     el("img", { src: thumbUrl(it.id), loading: "lazy", alt: "" }))));
+  const looks = el("textarea", { rows: "3", maxlength: "400", placeholder: "e.g. short black bob, round glasses, striped scarf, long cardigan" });
+  looks.dataset.cid = String(id);
+  looks.value = c.traits || "";
   box.replaceChildren(el("div", { class: "card" },
     el("div", { class: "crow" }, el("img", { src: thumbUrl(c.source_image), alt: "", onclick: () => openViewer([{ id: c.source_image }], 0) }),
       el("div", { class: "grow" }, el("h3", { text: c.name }), el("div", { class: "sub" + (c.status === "failed" ? " err" : ""), text: charLine(c) }))),
     c.status === "ready" ? el("div", { class: "acts", style: "padding:10px 0 0" },
       el("button", { class: "btn", onclick: () => useInChat(c) }, "💬 Use in chat"),
-      el("button", { class: "btn", onclick: () => pageWith(c) }, "📖 Make page")) : null,
+      el("button", { class: "btn", onclick: () => pageWith(c) }, "📖 Make page"),
+      el("button", { class: "btn", onclick: () => api("POST", `/api/characters/${c.id}/retry`).then(refresh).catch((e) => toast(e.message, { err: true })) }, "✓ Check pictures again")) : null,
+    c.status === "ready" ? el("div", {}, el("label", { class: "label", text: "Looks (goes into every picture of " + c.name + ")" }), looks,
+      el("button", { class: "btn", style: "margin-top:6px", onclick: () => api("POST", `/api/characters/${c.id}/traits`, { traits: looks.value }).then(() => { looks.blur(); toast("Saved"); refresh(); }).catch((e) => toast(e.message, { err: true })) }, "Save looks")) : null,
     all.length ? gridOf(all) : el("div", { class: "empty", text: "Pictures appear here as they are made." }),
-    dropped.length ? el("div", {}, el("div", { class: "label", text: `Not kept (${dropped.length}, looked less alike)` }), gridOf(dropped, "dropped")) : null));
+    dropped.length ? el("div", {}, el("div", { class: "label", text: `Not kept (${dropped.length})` }), gridOf(dropped, "dropped")) : null));
+}
+function reviewCard(c) {
+  const sc = c.scores || {};
+  const ids = (c.all || []).filter((i) => !(sc[i] && sc[i].spare));
+  const st = review[c.id] || (review[c.id] = { keep: new Set(c.refs), traits: c.traits || "" });
+  const count = el("span");
+  const save = el("button", { class: "primary", type: "button" });
+  const paintCount = () => { count.textContent = `${st.keep.size} of ${ids.length} kept`; save.textContent = `Save ${c.name} (${st.keep.size} pictures)`; save.disabled = !st.keep.size; };
+  const cells = ids.map((i, k) => {
+    const s = sc[i] || {};
+    const b = el("button", { class: "rv" + (st.keep.has(i) ? " on" : "") + (s.drifted ? " bad" : ""), "data-id": i, "aria-pressed": st.keep.has(i) ? "true" : "false", onclick: () => {
+      if (st.keep.has(i)) st.keep.delete(i); else st.keep.add(i);
+      b.classList.toggle("on", st.keep.has(i)); b.setAttribute("aria-pressed", st.keep.has(i) ? "true" : "false"); paintCount();
+    } },
+      el("img", { src: thumbUrl(i), loading: "lazy", alt: s.label || "" }),
+      el("span", { class: "tick", text: "✓" }),
+      el("span", { class: "lab", text: (s.label || "").replace("_", " ") + (s.drifted ? " · unlike" : "") }));
+    b.addEventListener("contextmenu", (e) => { e.preventDefault(); openViewer(ids.map((x) => ({ id: x })), k); });
+    return b;
+  });
+  const looks = el("textarea", { rows: "3", maxlength: "400", placeholder: "e.g. short black bob, round glasses, striped scarf, long cardigan" });
+  looks.value = st.traits;
+  looks.dataset.cid = String(c.id);
+  looks.addEventListener("input", () => { st.traits = looks.value; });
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try { await api("POST", `/api/characters/${c.id}/save`, { keep: [...st.keep], traits: st.traits }); delete review[c.id]; toast(`${c.name} is ready`); refresh(); }
+    catch (e) { toast(e.message, { err: true }); save.disabled = false; }
+  });
+  paintCount();
+  return el("div", { class: "card review" },
+    el("div", { class: "crow" }, el("img", { src: thumbUrl(c.source_image), alt: "", onclick: () => openViewer([{ id: c.source_image }], 0) }),
+      el("div", { class: "grow" }, el("h3", { text: c.name }), el("div", { class: "sub", text: "Tap a picture to keep or drop it. Only kept pictures are used as references. Long-press to see it big." }))),
+    el("div", { class: "label" }, count, el("span", { class: "dim", text: " · faded = looked unlike the first picture" })),
+    el("div", { class: "rvgrid" }, cells),
+    el("label", { class: "label", text: "Looks (written from the picture when the local AI is on; you can change it)" }), looks,
+    el("div", { class: "two", style: "margin-top:12px" }, save));
 }
 
 // ---------- pages ----------
@@ -600,35 +682,121 @@ async function loadPages() {
 }
 function pageCard(p) {
   const working = p.status === "working";
+  const names = p.chars.map((s) => (charBySlug[s] || { name: s }).name);
   const panels = p.panels.map((x, i) => {
     const j = x.job;
     const running = j && (j.status === "queued" || j.status === "running");
     const pct = j && j.total ? Math.round(100 * j.progress / j.total) : 0;
-    return el("div", { class: "panel" },
-      el("div", { class: "thumb" }, x.image_id ? el("img", { src: thumbUrl(x.image_id), alt: "", onclick: () => openViewer(p.panels.filter((q) => q.image_id).map((q) => ({ id: q.image_id })), p.panels.filter((q) => q.image_id).findIndex((q) => q.image_id === x.image_id)) }) : null,
-        running ? el("div", { class: "bar" + (j.status === "running" && j.total ? "" : " ind") }, el("i", { style: `width:${pct}%` })) : null),
-      el("div", { class: "n", text: `${i + 1}` + (j && j.status === "failed" ? " · failed" : running ? (j.status === "queued" ? " · waiting" : " · drawing") : "") }),
-      el("button", { class: "btn", disabled: running || undefined, onclick: () => redo(p.id, i) }, "↻ Redo"));
+    const shown = p.panels.filter((q) => q.image_id);
+    const vs = x.versions || [];
+    const who = (x.cast || []).map((k) => names[k]).filter(Boolean);
+    return el("div", { class: "panel", "data-idx": i },
+      el("div", { class: "thumb" }, x.image_id ? el("img", { src: thumbUrl(x.image_id), alt: `panel ${i + 1}`, onclick: () => openViewer(shown.map((q) => ({ id: q.image_id })), shown.findIndex((q) => q.image_id === x.image_id)) }) : null,
+        running ? el("div", { class: "bar" + (j.status === "running" && j.total ? "" : " ind") }, el("i", { style: `width:${pct}%` })) : null,
+        el("span", { class: "num", text: `${i + 1}` })),
+      el("div", { class: "n" + (j && j.status === "failed" ? " err" : ""), text: j && j.status === "failed" ? "failed: " + (j.error || "") : running ? (j.status === "queued" ? "waiting…" : "drawing…") : (who.length ? who.join(" + ") : "no character") }),
+      el("div", { class: "line", text: x.line }),
+      x.fixed ? el("div", { class: "fixed", text: "spelling fixed (you wrote: " + x.fixed + ")" }) : null,
+      x.warn ? el("div", { class: "warn", text: "⚠ " + x.warn }) : null,
+      vs.length > 1 ? el("div", { class: "vers" }, vs.map((v, k) => el("button", { class: v.image_id === x.image_id ? "on" : "", "aria-label": `version ${k + 1}`, title: v.line, disabled: running || undefined, onclick: () => pickVersion(p.id, i, v.image_id) },
+        el("img", { src: thumbUrl(v.image_id), alt: "" })))) : null,
+      el("div", { class: "pbtns" },
+        el("button", { class: "btn", disabled: running || undefined, onclick: () => redo(p.id, i) }, "↻ Redo"),
+        el("button", { class: "btn", disabled: running || undefined, onclick: () => editPanel(p, i) }, "✎ Edit")));
   });
-  return el("div", { class: "card" },
-    el("h3", { text: `Page ${p.id}` + (p.chars.length ? " · " + p.chars.map((s) => (charBySlug[s] || { name: s }).name).join(", ") : "") }),
-    el("div", { class: "sub" + (p.error ? " err" : ""), text: working ? "drawing the 4 panels…" : (p.error || `done · prompts by ${p.writer}`) }),
+  return el("div", { class: "card", "data-page": p.id },
+    el("h3", { text: `Page ${p.id}` + (names.length ? " · " + names.join(", ") : "") }),
+    el("div", { class: "sub" + (p.error ? " err" : ""), text: working ? (p.image_id ? "drawing the changed panel… the other panels stay" : "drawing the 4 panels…") : (p.error || `done · prompts by ${p.writer}`) }),
     p.image_id ? el("img", { class: "pagepic", src: thumbUrl(p.image_id, "m"), alt: "page", onclick: () => openViewer([{ id: p.image_id, source: "page" }], 0) }) : null,
+    el("div", { class: "hint", text: "Fix one panel: ↻ Redo draws it again, ✎ Edit changes its line or who is in it. Tap a small picture to go back to an older try." }),
     el("div", { class: "panels" }, panels),
-    p.image_id ? el("div", { class: "acts", style: "padding:10px 0 0" }, el("a", { class: "btn", href: imgUrl(p.image_id) + "?dl=1", download: "" }, "⬇ Download PNG")) : null);
+    p.image_id ? el("div", { class: "acts", style: "padding:10px 0 0" }, el("a", { class: "btn", href: imgUrl(p.image_id) + "&dl=1", download: "" }, "⬇ Download PNG")) : null);
 }
-async function redo(pid, i) {
-  try { await api("POST", `/api/pages/${pid}/panels/${i}/redo`); refresh(); } catch (e) { toast(e.message, { err: true }); }
+async function redo(pid, i, body) {
+  try { await api("POST", `/api/pages/${pid}/panels/${i}/redo`, body); toast(`Panel ${i + 1}: drawing again, the other panels stay`); refresh(); }
+  catch (e) { toast(e.message, { err: true }); }
+}
+async function pickVersion(pid, i, imageId) {
+  try { await api("POST", `/api/pages/${pid}/panels/${i}/pick`, { image_id: imageId }); refresh(); }
+  catch (e) { toast(e.message, { err: true }); }
+}
+function editPanel(p, i) {
+  const x = p.panels[i];
+  const line = el("textarea", { rows: "3", maxlength: "400" });
+  line.value = x.line;
+  const sel = new Set(x.cast || []);
+  const pick = el("div", { class: "chips wrap" });
+  const paint = () => { for (const b of pick.children) b.classList.toggle("on", sel.has(+b.dataset.k)); };
+  let touched = false;
+  const nm = p.chars.map((s) => (charBySlug[s] || { name: s }).name);
+  p.chars.forEach((s, k) => pick.append(el("button", { type: "button", class: "chip", "data-k": k, onclick: () => { touched = true; if (sel.has(k)) sel.delete(k); else sel.add(k); paint(); } }, nm[k])));
+  paint();
+  line.addEventListener("input", () => {  // same rule as the server: names in the line, else everybody
+    if (touched) return;
+    const named = nm.map((n, k) => new RegExp("\\b" + n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b").test(line.value.toLowerCase()) ? k : -1).filter((k) => k >= 0);
+    sel.clear(); for (const k of (named.length ? named : nm.map((_, k) => k))) sel.add(k); paint();
+  });
+  const go_ = el("button", { class: "primary", type: "submit" }, "↻ Redo this panel");
+  const form = el("form", { onsubmit: async (e) => {
+    e.preventDefault();
+    const t = line.value.trim();
+    if (!t) { line.focus(); toast("Write what happens in this panel"); return; }
+    go_.disabled = true;
+    const body = { line: t };
+    if (p.chars.length) body.cast = [...sel].sort();
+    await redo(p.id, i, body);
+    closeOv("sheet");
+  } },
+  el("h2", { text: `Panel ${i + 1}` }),
+  el("div", { class: "sub", text: "Change what happens, then draw only this panel again. The other 3 panels stay." }),
+  el("label", { class: "label", text: "What happens (\"quotes\" = speech bubble)" }), line,
+  p.chars.length ? el("div", {}, el("div", { class: "label", text: "Who is in this panel (only they get their reference pictures)" }), pick,
+    el("div", { class: "hint", text: "Picked by the names in the line; \"she\"/\"he\" or nicknames are not seen, so set it here." })) : null,
+  el("div", { class: "two" }, el("button", { class: "ghost", type: "button", onclick: () => closeOv("sheet") }, "Cancel"), go_));
+  openSheet(form);
+}
+function namedChars(lines) {  // ready characters whose name is written in the lines
+  const t = lines.join(" ").toLowerCase();
+  return chars.filter((c) => c.status === "ready" && new RegExp("\\b" + c.name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b").test(t));
+}
+function noCharSheet(lines) {  // nobody picked: every panel would draw a different person
+  return new Promise((resolve) => {
+    const ready = chars.filter((c) => c.status === "ready");
+    const sel = new Set(namedChars(lines).map((c) => c.slug).slice(0, 2));
+    const pick = el("div", { class: "pick" });
+    const paint = () => { for (const b of pick.children) b.classList.toggle("on", sel.has(b.dataset.slug)); };
+    for (const c of ready) pick.append(el("button", { type: "button", "data-slug": c.slug, onclick: () => {
+      if (sel.has(c.slug)) sel.delete(c.slug); else if (sel.size < 2) sel.add(c.slug); else toast("2 characters at most");
+      paint(); } }, el("img", { src: thumbUrl(c.source_image), alt: "" }), c.name));
+    paint();
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); closeOv("sheet"); } };
+    const body = el("div", { class: "nochar" }, el("h2", { text: "No character picked" }),
+      el("div", { class: "sub", text: "Without a character every panel draws a different person. " + (ready.length ? "Pick who is in this page:" : "Make a character first: open any picture and tap ★ Make character.") }),
+      ready.length ? pick : null,
+      el("div", { class: "two" },
+        el("button", { class: "ghost", type: "button", onclick: () => finish({ go: true, chars: [] }) }, "Make without"),
+        ready.length ? el("button", { class: "primary", type: "button", onclick: () => { if (!sel.size) { toast("Pick a character, or Make without"); return; } finish({ go: true, chars: [...sel] }); } }, "Use them") : null));
+    openSheet(body);
+    const obs = setInterval(() => { if ($("#sheet").hidden) { clearInterval(obs); if (!done) { done = true; resolve({ go: false }); } } }, 300);
+  });
 }
 $("#pageform").addEventListener("submit", async (e) => {
   e.preventDefault();
   const lines = lineIds.map((id) => $("#" + id).value.trim());
   const miss = lines.findIndex((x) => !x);
   if (miss >= 0) { toast(`Write panel ${miss + 1} first`); $("#" + lineIds[miss]).focus(); return; }
+  let pick = [...pageSel];
+  if (!pick.length) {
+    const r = await noCharSheet(lines);
+    if (!r.go) return;
+    pick = r.chars;
+    if (pick.length) { pageSel = new Set(pick); LS.set("manga-pagechars", pick); }
+  }
   const b = $("#makepage");
   b.disabled = true; b.textContent = "Starting…";
   try {
-    await api("POST", "/api/pages", { lines, chars: [...pageSel] });
+    await api("POST", "/api/pages", { lines, chars: pick });
     toast("Page started: 4 panels, about 1 min");
     await loadPages();
     $("#pagelist").scrollIntoView({ behavior: "smooth" });

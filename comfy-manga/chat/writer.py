@@ -9,6 +9,7 @@ import urllib.request
 
 import graphs
 import layout
+import refs
 
 LLM = os.environ.get("LLM_URL", "http://host.docker.internal:11434")
 FRAMING = ["Wide establishing shot that shows the place", "Medium shot", "Close-up on the face and hands",
@@ -16,11 +17,17 @@ FRAMING = ["Wide establishing shot that shows the place", "Medium shot", "Close-
 
 
 def cast_text(chars):
-    """chars: list of {"name"}; each character has 2 reference pictures, in order."""
-    parts = []
-    for i, c in enumerate(chars):
-        a, b = 2 * i + 1, 2 * i + 2
-        parts.append(f"{c['name']} is the person shown in image {a} and image {b}")
+    """chars: list of {"name", "n" (reference pictures, in order), "traits"}."""
+    parts, k = [], 1
+    for c in chars:
+        n = c.get("n", 2)
+        imgs = [f"image {i}" for i in range(k, k + n)]
+        k += n
+        say = ", ".join(imgs[:-1]) + f" and {imgs[-1]}" if n > 1 else imgs[0]
+        t = f"{c['name']} is the person shown in {say}"
+        if c.get("traits"):
+            t += f" ({c['name']}: {c['traits'].strip().rstrip('.')})"
+        parts.append(t)
     return "; ".join(parts) + "." if parts else ""
 
 
@@ -28,9 +35,12 @@ def template(scene, chars, framing):
     keep = ("Keep each character's face, hair, body and outfit exactly as in the reference pictures. "
             if chars else "")
     shot = f"{framing}. " if framing else ""
+    n = refs.per_char(len(chars))
+    chars = [{**c, "n": c.get("n", n)} for c in chars]
     scene = scene.strip().rstrip(".") + "."
     return (f"Manga panel. {shot}{cast_text(chars)} Scene: {scene} {keep}{graphs.STYLE} "
-            "No text, no letters, no speech bubbles, no panel borders.").replace("  ", " ")
+            "The drawing fills the whole picture edge to edge. No text, no letters, no speech bubbles, no panel borders, "
+            "no white bars.").replace("  ", " ")
 
 
 def _loaded_model():
@@ -46,24 +56,30 @@ def _loaded_model():
     return None
 
 
-def _llm(model, scenes, chars):
+def _llm(model, lines, chars):
     names = ", ".join(c["name"] for c in chars) or "no named characters"
     ask = ("You write image prompts for 4 panels of one black-and-white manga page. Characters: " + names + ".\n"
            "For each panel line below, write ONE sentence describing only what the camera sees: shot type "
            "(vary them: wide, medium, close-up, over-the-shoulder), who is where, pose, action, facial expression, "
-           "setting. Use the character names. No dialogue, no text, no style words.\n"
-           + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(scenes)) +
-           '\nAnswer with JSON only: {"panels": ["...", "...", "...", "..."]}')
+           "setting. Use the character names. No dialogue, no text, no style words. If a line already says the shot "
+           "(close-up, zoom, focus on, from behind...), keep that shot.\n"
+           "Also return each line with only its spelling mistakes fixed (same words otherwise, keep \"quotes\").\n"
+           + "\n".join(f"{i + 1}. {s}" for i, s in enumerate(lines)) +
+           '\nAnswer with JSON only: {"panels": ["...", "...", "...", "..."], "fixed": ["...", "...", "...", "..."]}')
     body = {"model": model, "messages": [{"role": "user", "content": ask}], "temperature": 0.4, "max_tokens": 600}
     req = urllib.request.Request(LLM + "/v1/chat/completions", json.dumps(body).encode(),
                                  {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=90) as r:
         text = json.load(r)["choices"][0]["message"]["content"]
     m = re.search(r"\{.*\}", text, re.S)
-    panels = json.loads(m.group(0))["panels"]
+    d = json.loads(m.group(0))
+    panels = d["panels"]
     if len(panels) != 4 or not all(isinstance(p, str) and p.strip() for p in panels):
         raise ValueError("bad LLM answer")
-    return [p.strip() for p in panels]
+    fixed = d.get("fixed") if isinstance(d.get("fixed"), list) and len(d.get("fixed")) == 4 else [None] * 4
+    fixed = [f.strip() if isinstance(f, str) and f.strip() and f.strip() != ln.strip() else None
+             for f, ln in zip(fixed, lines)]
+    return [p.strip() for p in panels], fixed
 
 
 def who(scene, chars):
@@ -72,8 +88,28 @@ def who(scene, chars):
     return named or list(range(len(chars)))
 
 
+SHOT_WORDS = re.compile(r"\b(close[- ]?up|wide|establishing|medium|full[- ]body|over[- ]the[- ]shoulder|from (below|above)|"
+                        r"low[- ]angle|high[- ]angle|bird'?s[- ]eye|worm'?s[- ]eye|profile|side view|from behind(?! (?:the|a|an|his|her|their) )|focus(?:es|ed)? on|"
+                        r"zoom(?:s|ed)?(?: in| out| into)?|pan(?:s)? (?:to|across|over)|drifts?|overhead|extreme|"
+                        r"shot|view of|seen from|camera)\b", re.I)
+
+
+def framing(scene, idx):
+    """The default shot for a panel, unless the line already says one ("close-up: ...")."""
+    return None if SHOT_WORDS.search(scene) else FRAMING[idx % len(FRAMING)]
+
+
+def panel(line, chars, idx, cast=None):
+    """One panel again (after the user edits its line or its characters): (prompt, quotes, cast).
+    cast: indexes into chars chosen by the user; None = the characters the line names."""
+    scene, quotes = layout.split_line(line)
+    if cast is None:
+        cast = who(scene, chars)
+    return template(scene, [chars[i] for i in cast], framing(scene, idx)), quotes, cast
+
+
 def write(lines, chars):
-    """Returns (prompts, quotes, cast per panel (indexes into chars), writer-name).
+    """Returns (prompts, quotes, cast per panel (indexes into chars), writer-name, spelling-fixed lines or None).
     Each panel gets only the characters its line names, so klein does not draw someone twice."""
     split = [layout.split_line(ln) for ln in lines]
     scenes = [s for s, _ in split]
@@ -82,10 +118,14 @@ def write(lines, chars):
     model = _loaded_model()
     if model:
         try:
-            shots = _llm(model, scenes, chars)
+            shots, fixed = _llm(model, lines, chars)
+            for k, f in enumerate(fixed):  # a fixed line (typos) also fixes its speech bubbles and names
+                if f:
+                    sc, quotes[k] = layout.split_line(f)
+                    casts[k] = who(sc, chars)
             return ([template(s, [chars[i] for i in casts[k]], None) for k, s in enumerate(shots)], quotes, casts,
-                    f"local LLM ({model})")
+                    f"local LLM ({model})", fixed)
         except Exception:
             pass
-    return ([template(s, [chars[i] for i in casts[k]], FRAMING[k]) for k, s in enumerate(scenes)], quotes, casts,
-            "template")
+    return ([template(s, [chars[i] for i in casts[k]], framing(s, k)) for k, s in enumerate(scenes)], quotes, casts,
+            "template", [None] * 4)

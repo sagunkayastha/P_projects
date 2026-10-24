@@ -66,7 +66,7 @@
         <textarea id="l3" rows="2" placeholder="close-up: Mia's eyes go wide as she reads"></textarea>
         <label class="label" for="l4">Panel 4 · bottom</label>
         <textarea id="l4" rows="2" placeholder='Mia runs out of the room. "I have to find him!"'></textarea>
-        <div class="hint">Speech in "quotes" becomes a speech bubble. Read right to left: 1 top, 2 right, 3 left, 4 bottom.</div>
+        <div class="hint">Write the character's name in a line to put them in that panel (a line with no name gets all picked characters; "she"/"he" or nicknames do not count). You can change who is in a panel later with ✎ Edit. Speech in "quotes" becomes a speech bubble. Read right to left: 1 top, 2 right, 3 left, 4 bottom.</div>
         <button id="makepage" class="primary" type="submit">Make page</button>
       </form>
       <div id="pagelist" class="list"></div>
@@ -104,7 +104,7 @@
 </div>
 
 <div id="toast" hidden></div>
-<script>window.APP_VERSION = "{{v}}";</script>
+<script>window.APP_VERSION = "{{v}}"; window.STORE = "{{store}}";</script>
 <script src="/static/app.js?v={{v}}"></script>
 </body>
 </html>

@@ -55,6 +55,39 @@ def split_line(line):
     return scene or line.strip(), quotes[:2]
 
 
+def _band(lines):
+    """How many blank lines (near-white and flat) a list of pixel lines starts with."""
+    n = 0
+    for px in lines:
+        mean = sum(px) / len(px)
+        if mean < 245 or max(px) - min(px) > 40:
+            break
+        n += 1
+    return n
+
+
+def trim_letterbox(im):
+    """klein sometimes draws a wide picture with white bars above and below (or a tall one with bars left
+    and right) inside the panel's frame. Cut such bars (blank on both sides, each >= 4%) so the panel is filled."""
+    k = 256 / max(im.size)
+    sm = im.convert("L").resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.BILINEAR)
+    w, h = sm.size
+    px = list(sm.getdata())
+    rows = [px[y * w:(y + 1) * w] for y in range(h)]
+    cols = [px[x::w] for x in range(w)]
+    top, bot, lef, rig = _band(rows), _band(rows[::-1]), _band(cols), _band(cols[::-1])
+    box = [0, 0, w, h]
+    if top >= 0.04 * h and bot >= 0.04 * h and top + bot < 0.8 * h:
+        box[1], box[3] = top, h - bot
+    if lef >= 0.04 * w and rig >= 0.04 * w and lef + rig < 0.8 * w:
+        box[0], box[2] = lef, w - rig
+    if box == [0, 0, w, h]:
+        return im
+    x0, y0 = round(box[0] / k), round(box[1] / k)
+    x1, y1 = min(im.width, round(box[2] / k)), min(im.height, round(box[3] / k))
+    return im.crop((x0, y0, x1, y1))
+
+
 def _cover(im, w, h):
     s = max(w / im.width, h / im.height)
     im = im.resize((max(w, round(im.width * s)), max(h, round(im.height * s))), Image.LANCZOS)
@@ -94,7 +127,7 @@ def compose(panel_pngs, quotes):
     for i, poly in enumerate(PANELS):
         a, b, c, d = bbox(poly)
         if panel_pngs[i]:
-            im = _cover(Image.open(io.BytesIO(panel_pngs[i])).convert("RGB"), c - a, d - b)
+            im = _cover(trim_letterbox(Image.open(io.BytesIO(panel_pngs[i])).convert("RGB")), c - a, d - b)
             mask = Image.new("L", (c - a, d - b), 0)
             ImageDraw.Draw(mask).polygon([(x - a, y - b) for x, y in poly], fill=255)
             page.paste(im, (a, b), mask)

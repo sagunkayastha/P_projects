@@ -21,6 +21,7 @@ import db
 import graphs
 import layout
 import media
+import refs as refpick
 import studio
 import worker
 import writer
@@ -67,7 +68,9 @@ async def cache_rules(request: Request, call_next):
         # index.html asks for /static/x?v=<content hash>: safe to cache for ever; anything else must revalidate
         resp.headers["Cache-Control"] = ("public, max-age=31536000, immutable" if request.query_params.get("v")
                                          else "no-cache")
-    elif path.startswith("/api/") and "Cache-Control" not in resp.headers:
+    else:
+        # no-store for everything else, pictures too: picture ids start at 1 again in a fresh (private) store,
+        # so a cached /api/images/1 would show an old picture
         resp.headers["Cache-Control"] = "no-store"
     return resp
 
@@ -77,7 +80,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 @app.get("/")
 def index():
-    html = (STATIC / "index.html").read_text().replace("{{v}}", VERSION)
+    html = (STATIC / "index.html").read_text().replace("{{v}}", VERSION).replace("{{store}}", db.STORE)
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
@@ -153,28 +156,33 @@ def _ready_chars(slugs):
     return out
 
 
-def _char_refs(ch):
-    """Two pictures per character for klein: the source + the closest reference."""
-    refs = [ch["source_image"]]
-    best = [r for r in (ch["refs"] or []) if r != ch["source_image"]]
-    if best:
-        refs.append(best[0])
-    else:
-        refs.append(ch["source_image"])
-    return refs
+def _char_refs(ch, text, n):
+    """n pictures of a character for klein: the source + the saved views that fit this picture's camera
+    angle, outfit and expression (refs.py)."""
+    return refpick.pick(ch, text, n)
 
 
-def _chat_job(text, shape, chars, owner):
+def _cast(chars, text):
+    """(reference picture ids, cast dicts for writer.cast_text) for the characters in one picture."""
+    n = refpick.per_char(len(chars))
+    ids, cast = [], []
+    for ch in chars:
+        r = _char_refs(ch, text, n)
+        ids += r
+        cast.append({"name": ch["name"], "n": len(r), "traits": ch.get("traits") or ""})
+    return ids, cast
+
+
+def _chat_job(text, shape, chars, owner, seed=None):
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
     if chars:
-        refs = [r for ch in chars for r in _char_refs(ch)]
-        cast = writer.cast_text([{"name": ch["name"]} for ch in chars])
-        prompt = (f"{cast} {text}. Keep each character's face, hair, body and outfit exactly as in the reference "
-                  f"pictures. {graphs.STYLE} No text, no letters, no speech bubbles.")
-        params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": worker.seed(), "refs": refs,
+        refs, cast = _cast(chars, text)
+        prompt = (f"{writer.cast_text(cast)} {text}. Keep each character's face, hair, body and outfit exactly as in "
+                  f"the reference pictures. {graphs.STYLE} No text, no letters, no speech bubbles.")
+        params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "refs": refs,
                   "chars": [c["slug"] for c in chars]}
     else:
-        params = {"prompt": text, "text": text, "w": w, "h": h, "seed": worker.seed()}
+        params = {"prompt": text, "text": text, "w": w, "h": h, "seed": seed or worker.seed()}
     return worker.add_job("image", params, owner)
 
 
@@ -204,13 +212,16 @@ def send(cid: int, body: dict = Body(...)):
 
 
 @app.post("/api/messages/{mid}/again")
-def again(mid: int):
+def again(mid: int, body: dict = Body(default={})):
+    """Same prompt again as a new message: seed "new" (default) or "same" (same picture settings)."""
     m = db.get("messages", mid)
     if not m:
         raise HTTPException(404, "no such message")
     chars = _ready_chars(m["chars"])
+    old = db.get("jobs", m["job_id"]) if m["job_id"] else None
+    seed = old["params"].get("seed") if old and (body or {}).get("seed") == "same" else None
     nid = db.insert("messages", chat_id=m["chat_id"], text=m["text"], shape=m["shape"], chars=m["chars"] or [])
-    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}")
+    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}", seed)
     db.update("messages", nid, job_id=jid)
     return _msg_view(db.get("messages", nid))
 
@@ -236,7 +247,7 @@ def image(iid: int, dl: int = 0):
         p, row = media.path(iid)
     except FileNotFoundError:
         raise HTTPException(404, "no such picture")
-    headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+    headers = {"Cache-Control": "no-store"}
     if dl:
         headers["Content-Disposition"] = f'attachment; filename="manga-{iid}.png"'
     return FileResponse(p, media_type="image/png", headers=headers)
@@ -256,7 +267,7 @@ def thumb(iid: int, s: str = "s"):
         p = media.thumb(iid, s if s in media.SIZES else "s")
     except FileNotFoundError:
         raise HTTPException(404, "no such picture")
-    return FileResponse(p, media_type="image/webp", headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    return FileResponse(p, media_type="image/webp", headers={"Cache-Control": "no-store"})
 
 
 # ---------- characters ----------
@@ -264,7 +275,7 @@ def _char_view(ch, full=False):
     owner = f"char:{ch['id']}"
     counts = {r["status"]: r["n"] for r in db.query(
         "SELECT status, COUNT(*) AS n FROM jobs WHERE owner=? AND kind='charref' GROUP BY status", (owner,))}
-    out = {k: ch[k] for k in ("id", "slug", "name", "source_image", "status", "error", "ts")}
+    out = {k: ch[k] for k in ("id", "slug", "name", "source_image", "status", "error", "ts", "traits")}
     out["made"] = counts.get("done", 0)
     out["planned"] = sum(counts.values())
     out["refs"] = ch["refs"] or []
@@ -275,7 +286,7 @@ def _char_view(ch, full=False):
         made = db.query("SELECT image_id FROM jobs WHERE owner=? AND kind='charref' AND status='done' ORDER BY id",
                         (owner,))
         out["dropped"] = [r["image_id"] for r in made if r["image_id"] not in (ch["refs"] or [])] \
-            if ch["status"] == "ready" else []
+            if ch["status"] in ("ready", "review") else []
         out["all"] = [r["image_id"] for r in made]
     return out
 
@@ -312,12 +323,51 @@ def make_character(body: dict = Body(...)):
         raise HTTPException(404, "no such picture")
     slug = _slug(name)
     cid = db.insert("characters", slug=slug, name=name, source_image=iid, status="building", refs=[])
+    # first a trait list from the picture (local vision LLM, only if it is running), used in every prompt
+    if refpick.ON:
+        worker.add_job("traits", {"char": cid}, f"char:{cid}")
     w, h = studio.SIZE
     s = worker.seed()  # one seed for the whole set: same noise, only the instruction changes
     for label, change in worker.char_plan():
-        worker.add_job("charref", {"prompt": studio.edit_prompt("klein9", change, ""), "src": iid, "w": w, "h": h,
+        worker.add_job("charref", {"change": change, "prompt": "", "src": iid, "w": w, "h": h,
                                    "seed": s, "label": label}, f"char:{cid}")
     return _char_view(db.get("characters", cid))
+
+
+@app.post("/api/characters/{cid}/save")
+def save_character(cid: int, body: dict = Body(...)):
+    """After the review grid: the views the user keeps (+ the trait list) make the character usable."""
+    ch = db.get("characters", cid)
+    if not ch:
+        raise HTTPException(404, "no such character")
+    if ch["status"] not in ("review", "ready"):
+        raise HTTPException(409, "this character is still being made")
+    made = {r["image_id"] for r in db.query("SELECT image_id FROM jobs WHERE owner=? AND kind='charref' AND "
+                                            "status='done'", (f"char:{cid}",))}
+    keep = body.get("keep")
+    if not isinstance(keep, list) or not all(isinstance(i, int) and i in made for i in keep):
+        raise HTTPException(400, "bad picture choice")
+    if not keep:
+        raise HTTPException(400, "keep at least one picture")
+    scores = ch["scores"] or {}
+    keep = sorted(set(keep), key=lambda i: -(scores.get(str(i), {}).get("score") or 0))
+    traits = body.get("traits")
+    f = {"status": "ready", "refs": keep}
+    if traits is not None:
+        f["traits"] = str(traits).strip()[:400]
+    db.update("characters", cid, **f)
+    worker._write_character_folder(db.get("characters", cid))
+    return _char_view(db.get("characters", cid), full=True)
+
+
+@app.post("/api/characters/{cid}/traits")
+def set_traits(cid: int, body: dict = Body(...)):
+    """The character's looks in words (used in every prompt). Editable at any time."""
+    ch = db.get("characters", cid)
+    if not ch:
+        raise HTTPException(404, "no such character")
+    db.update("characters", cid, traits=str(body.get("traits") or "").strip()[:400])
+    return _char_view(db.get("characters", cid), full=True)
 
 
 @app.post("/api/characters/{cid}/cancel")
@@ -360,7 +410,7 @@ def retry_character(cid: int):
 # ---------- pages ----------
 def _page_view(pg):
     out = {k: pg[k] for k in ("id", "ts", "chars", "lines", "image_id", "status", "error", "writer")}
-    out["panels"] = [{**p, "job": _job_view(p.get("job_id"))} for p in pg["panels"]]
+    out["panels"] = [{**p, "job": _job_view(p.get("job_id")), "versions": worker.versions(p)} for p in pg["panels"]]
     return out
 
 
@@ -379,11 +429,13 @@ def page(pid: int):
 
 def _panel_job(pid, idx, panel, chars):
     w, h = graphs.fit_size(layout.aspects()[idx], 1.0)
-    params = {"prompt": panel["prompt"], "w": w, "h": h, "seed": worker.seed(), "page": pid, "idx": idx}
+    params = {"prompt": panel["prompt"], "w": w, "h": h, "seed": worker.seed(), "page": pid, "idx": idx,
+              "line": panel["line"], "quotes": panel.get("quotes", [])}
     if "cast" in panel:
         chars = [chars[i] for i in panel["cast"] if i < len(chars)]
     if chars:
-        params["refs"] = [r for ch in chars for r in _char_refs(ch)]
+        params["refs"], _ = _cast(chars, panel["line"] + " " + panel["prompt"])
+        params["check_ref"], params["check_name"] = chars[0]["source_image"], chars[0]["name"]
     return worker.add_job("panel", params, f"page:{pid}:{idx}")
 
 
@@ -393,8 +445,12 @@ def make_page(body: dict = Body(...)):
     if len(lines) != 4 or not all(lines):
         raise HTTPException(400, "write one line for each of the 4 panels")
     chars = _ready_chars(body.get("chars"))
-    prompts, quotes, casts, who = writer.write(lines, [{"name": c["name"]} for c in chars])
+    prompts, quotes, casts, who, fixed = writer.write(lines, _wchars(chars))
     panels = [{"line": lines[i], "prompt": prompts[i], "quotes": quotes[i], "cast": casts[i]} for i in range(4)]
+    for i in range(4):
+        if fixed[i]:  # spelling fixed by the local LLM writer: used, and the user sees what it was
+            panels[i]["fixed"] = lines[i]
+            panels[i]["line"] = lines[i] = fixed[i]
     pid = db.insert("pages", chars=[c["slug"] for c in chars], lines=lines, panels=panels, status="working",
                     writer=who)
     for i in range(4):
@@ -403,18 +459,70 @@ def make_page(body: dict = Body(...)):
     return _page_view(db.get("pages", pid))
 
 
+def _wchars(chars):
+    """What the prompt writer needs of each character (n = reference pictures it gets in a panel)."""
+    return [{"name": c["name"], "traits": c.get("traits") or ""} for c in chars]
+
+
+def _busy(job_id):
+    return bool(job_id) and db.get("jobs", job_id)["status"] in ("queued", "running")
+
+
 @app.post("/api/pages/{pid}/panels/{idx}/redo")
-def redo_panel(pid: int, idx: int):
+def redo_panel(pid: int, idx: int, body: dict = Body(default={})):
+    """Draw one panel again (new seed); the other panels stay. Optional: a new line and/or which of the
+    page's characters are in it (cast = indexes into the page's characters). The old picture stays as a
+    version the user can pick again."""
     pg = db.get("pages", pid)
     if not pg or not 0 <= idx < 4:
         raise HTTPException(404, "no such panel")
     chars = _ready_chars(pg["chars"])
     panels = pg["panels"]
-    old = panels[idx].get("job_id")
-    if old and db.get("jobs", old)["status"] in ("queued", "running"):
+    pn = panels[idx]
+    if _busy(pn.get("job_id")) or _busy(pn.get("check_id")):
         raise HTTPException(409, "this panel is still being made")
-    panels[idx]["job_id"] = _panel_job(pid, idx, panels[idx], chars)
+    line = body.get("line")
+    cast = body.get("cast")
+    if line is not None:
+        line = str(line).strip()[:400]
+        if not line:
+            raise HTTPException(400, "write what happens in this panel")
+    if cast is not None:
+        if not isinstance(cast, list) or not all(isinstance(i, int) and 0 <= i < len(chars) for i in cast):
+            raise HTTPException(400, "bad character choice")
+        cast = sorted(set(cast))
+    if line is not None or cast is not None:
+        new_line = line if line is not None else pn["line"]
+        if cast is None and line is not None:
+            cast = pn.get("cast")  # keep the user's earlier choice of characters
+        prompt, quotes, cast = writer.panel(new_line, _wchars(chars), idx, cast)
+        pn.update(line=new_line, prompt=prompt, quotes=quotes, cast=cast, fixed=None, warn=None)
+        lines = pg["lines"]
+        lines[idx] = new_line
+        db.update("pages", pid, lines=lines)
+    pn["job_id"] = _panel_job(pid, idx, pn, chars)
+    pn["warn"] = None
     db.update("pages", pid, panels=panels, status="working", error=None)
+    return _page_view(db.get("pages", pid))
+
+
+@app.post("/api/pages/{pid}/panels/{idx}/pick")
+def pick_version(pid: int, idx: int, body: dict = Body(...)):
+    """Use an earlier (or the newest) picture of a panel and put the page together again."""
+    pg = db.get("pages", pid)
+    if not pg or not 0 <= idx < 4:
+        raise HTTPException(404, "no such panel")
+    panels = pg["panels"]
+    pn = panels[idx]
+    v = next((v for v in worker.versions(pn) if v["image_id"] == body.get("image_id")), None)
+    if not v:
+        raise HTTPException(404, "no such version")
+    pn.update(image_id=v["image_id"], quotes=v.get("quotes", pn.get("quotes", [])), line=v.get("line", pn["line"]))
+    lines = pg["lines"]
+    lines[idx] = pn["line"]
+    db.update("pages", pid, panels=panels, lines=lines)
+    if not worker.page_busy(db.get("pages", pid)):
+        worker.compose_page(pid)
     return _page_view(db.get("pages", pid))
 
 
