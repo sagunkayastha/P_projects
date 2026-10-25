@@ -44,6 +44,9 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     New picture still copies the pose when the words name none (cafe test kept the sitting pose: new_cafe.png).
 
 ## Next
+0. 2026-10-26: PC rebooting into Windows. To resume the tests: `docker compose up -d comfyui` then
+   `TEST_DATA=~/scratch/mangaapp/testdata docker compose -f docker-compose.test.yml up -d` (image local/comfymanga:test = 4c3c933).
+   Live :8289 still down (not restarted; needs Rem's word).
 1. GPU tests WITH the user (Rem: tomorrow, 2026-10-26), on the test app :8290 after rebuild: sketch -> picture
    with each model; prompt-only per model; Make character with an edited list (pictures match the list); Edit of
    a waiting panel. Then deploy only on the user's yes.
