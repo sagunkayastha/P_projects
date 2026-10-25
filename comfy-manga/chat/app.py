@@ -645,6 +645,10 @@ def redo_panel(pid: int, idx: int, body: dict = Body(default={})):
         lines[idx] = new_line
         db.update("pages", pid, lines=lines)
     pn["warn"] = None
+    if not pn.get("job_id") and pg["status"] == "working":  # not started yet: the page draws it with the new line
+        db.update("pages", pid, panels=panels)
+        pagejobs.advance(pid)
+        return _page_view(db.get("pages", pid))
     db.update("pages", pid, panels=panels, status="working", error=None)
     pg = db.get("pages", pid)
     try:

@@ -882,7 +882,7 @@ function pageCard(p) {
         el("img", { src: thumbUrl(v.image_id), alt: "" })))) : null,
       el("div", { class: "pbtns" },
         el("button", { class: "btn", disabled: running || (working && !j) || undefined, onclick: () => redo(p.id, i) }, "↻ Redo"),
-        el("button", { class: "btn", disabled: running || (working && !j) || undefined, onclick: () => editPanel(p, i) }, "✎ Edit")));
+        el("button", { class: "btn", disabled: running || undefined, onclick: () => editPanel(p, i, working && !j) }, "✎ Edit")));
   });
   return el("div", { class: "card", "data-page": p.id },
     el("h3", { text: `Page ${p.id}` + (names.length ? " · " + names.join(", ") : "") }),
@@ -934,7 +934,7 @@ async function pickVersion(pid, i, imageId) {
   try { await api("POST", `/api/pages/${pid}/panels/${i}/pick`, { image_id: imageId }); refresh(); }
   catch (e) { toast(e.message, { err: true }); }
 }
-function editPanel(p, i) {
+function editPanel(p, i, waiting) {  // waiting: not drawn yet (the page is still busy); the new line is used when its turn comes
   const x = p.panels[i];
   const line = el("textarea", { rows: "3", maxlength: "400" });
   line.value = x.line;
@@ -950,7 +950,7 @@ function editPanel(p, i) {
     const named = nm.map((n, k) => new RegExp("\\b" + n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b").test(line.value.toLowerCase()) ? k : -1).filter((k) => k >= 0);
     sel.clear(); for (const k of (named.length ? named : nm.map((_, k) => k))) sel.add(k); paint();
   });
-  const go_ = el("button", { class: "primary", type: "submit" }, "↻ Redo this panel");
+  const go_ = el("button", { class: "primary", type: "submit" }, waiting ? "Save (drawn in its turn)" : "↻ Redo this panel");
   const form = el("form", { onsubmit: async (e) => {
     e.preventDefault();
     const t = line.value.trim();
@@ -958,7 +958,10 @@ function editPanel(p, i) {
     go_.disabled = true;
     const body = { line: t };
     if (p.chars.length) body.cast = [...sel].sort();
-    await redo(p.id, i, body);
+    if (waiting) {
+      try { await api("POST", `/api/pages/${p.id}/panels/${i}/redo`, body); toast(`Panel ${i + 1}: changed, drawn in its turn`); refresh(); }
+      catch (err) { toast(err.message, { err: true }); }
+    } else await redo(p.id, i, body);
     closeOv("sheet");
   } },
   el("h2", { text: `Panel ${i + 1}` }),
