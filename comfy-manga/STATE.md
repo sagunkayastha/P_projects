@@ -37,7 +37,7 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
 3. Private / Continue choice at start (not built).
 
 ## Blockers / waiting on
-- User's yes for the deploy (ef7ee07..b65536e).
+- Nothing. Deployed ef7ee07..b65536e private mode 2026-10-25 (backup image local/comfymanga:pre-deploy-20261025).
 
 ## Decisions
 - 2026-10-24: one app at / (chat, gallery, characters, page). Old /studio and /demo routes removed from app.py
