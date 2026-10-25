@@ -39,7 +39,8 @@ services:
       - APP_DIR=/data/manga/app                          # everything the app makes: SQLite + pictures (on disk)
       - IMPORT_DIRS=/data/manga/ram-backup-2026-10-24    # copied (read only) into the gallery once
       - LLM_URL=http://host.docker.internal:11434        # local llama.cpp router, used only if a model is loaded
-      - MANGA_B=0   # phase B (angle refs, trait list, best-of-2, review before save): off until tested
+      - MANGA_B=1   # phase B (angle refs, trait list, best-of-2, review before save); 0 = old behaviour
+      - MANGA_CONT=1   # scene pictures / previous panel, upper-body reference sheets; 0 = old behaviour
       - TZ=America/Denver
     extra_hosts:
       - "host.docker.internal:host-gateway"
