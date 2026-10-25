@@ -51,6 +51,10 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     Qwen-Edit equal but slower; Anima Scribble LoRA (grainy) and Qwen-Image 2.1 int8 + Fun ControlNet Union (copies
     or ignores the sketch) not added. Test-only paths in the app API: model "qwen" / "scribble" / "q21" with a sketch
     (no UI). Qwen 2.1 files (~18 GB) + scribble LoRA kept in models/ until the user decides.
+  - 2026-10-26 A/B round r1 (~/scratch/mangafix/ab/r1/REPORT.md, TABLE.md): 96 Modify + 48 Sketch pictures, 3 judges.
+    Sketch: klein best (all judges). Modify: near tie (Codex klein, Gemini Qwen); Qwen better for New-picture scene/
+    action. Blind A/B page for the user: https://claude.ai/artifact/Msh9dySQ34EWfpAcGKz5Jv (picks in its db
+    collection "picks"; key in r1/<round>/key.json: modify A=qwen B=klein, sketch A=qwen B=anima C=klein).
 
 ## Next
 0. 2026-10-26: PC rebooting into Windows. To resume the tests: `docker compose up -d comfyui` then
