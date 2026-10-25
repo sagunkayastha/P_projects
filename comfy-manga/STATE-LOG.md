@@ -1,5 +1,22 @@
 # comfy-manga — STATE-LOG (newest first)
 
+## 2026-10-25 (eve) — round p2 done + deployed; sketch upload, model choice (klein/Anima/Manga Vision), character set-up list, Edit-while-drawing built (not deployed) ⚠️ (rem-mangafix)
+- Shipped "order" panel prompt (13e413f) + hands/object detail-shot wording (73b82b3). DEPLOYED 73b82b3 private
+  mode on user's yes (image sha256:4ca7c9da; rollback tag local/comfymanga:pre-deploy-20261025b).
+- p2 A check (Codex/Gemini adherence): base 83/68, order 92/73, app 92/72. VLM judge on p2 not run yet.
+- p2 hard shots (VLM/Codex/Gemini): app 72/78/52, sil_ref 78/78/50, sil_base 78/78/62, lllite 61/56/48
+  (lllite:comp 72 VLM). Over-the-shoulder still weakest; silhouette blockouts don't help reliably.
+- p2 views: klein-turned views barely turn (copies of the plate); Anima views turn but the room drifts. Gemini best
+  views_anima, Codex best views_klein; both: plan the room layout once, draw views from it. judge_views not run.
+- Built (test image only): sketch upload POST /api/sketch (2418b93); character set-up list GET /api/charsetup +
+  `setup` on POST /api/characters, plan column (2418b93); model chip klein/Anima (2418b93) + Manga Vision
+  (4f14ceb, model file in models/diffusion_models, not yet loaded by ComfyUI); scraped-data note removed (da6dc6d);
+  Edit enabled for waiting panels, server updates the line and advances (72ab6a5). User's "edit doesn't work":
+  no edit reached the server; likely the disabled button on not-started panels.
+- Playwright (no GPU): set-up list 28 default -> 23 with 2 angles off + 1 outfit; sketch chip/preview; Edit on a
+  finished panel. Waiting-panel Edit and all drawing untested (GPU tests with user 2026-10-26).
+- 2026-10-25 late: manga-app + comfyui-manga exited (137), not by rem-mangafix; other ComfyUI stack (:8188/:8189) up.
+
 
 ## 2026-10-25 — panel adherence round p1: "order" prompt best; one shared place picture is why panels repeat the camera ⚠️ (rem-mangafix)
 - tests/panelset.py (8 lines + yes/no checks), bench_panels.py, bench_bg.py, judge_panels.py; results in

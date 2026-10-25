@@ -1,5 +1,5 @@
 # comfy-manga — STATE
-Updated: 2026-10-25 00:30 (MDT) · by rem-mangafix (Claude, PC laanta-chy)
+Updated: 2026-10-25 23:30 (MDT) · by rem-mangafix (Claude, PC laanta-chy)
 
 ## Goal
 Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU 0): chat -> pictures,
@@ -25,19 +25,31 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     strip, read right to left, speech bubbles from "quoted" text. Redo one panel re-composes. ~75 s per page.
     Panel prompts: local LLM only if a model is already loaded in the llama.cpp router, else template.
 - Samsung tested 2026-10-25 (adb RZCR908FCPN on archbox): per-panel Edit/Redo works with ef7ee07.
-- Built, not deployed (ef7ee07..b65536e): phone fixes, queue/progress, busy-pick fix, refs on page card, ink + shot
-  + "exactly once" panel wording (quality rounds, see STATE-LOG 2026-10-25).
+- LIVE since 2026-10-25 (private mode): 73b82b3 = quality rounds + "order" panel prompt (line + shot first, short)
+  + hands/object close-ups get detail-shot wording. Image sha256:4ca7c9da.
+- Built + committed, test image only, NOT deployed (2418b93..4f14ceb):
+  - Chat sketch upload (✎ Sketch chip): klein keeps the sketch layout, character sheets as extra refs.
+  - Model chip in chat: klein (default) / Anima / Manga Vision (Anima-family, Civitai 3188880, SHA-256 checked).
+    Prompt-only chat now uses klein t2i (was Anima).
+  - Character set-up list before Make character (angles / faces / outfits, add own items, live count).
+  - Panel Edit works while the page still draws (waiting panel takes the new line) — 72ab6a5.
+  - UI checked in Playwright without GPU; drawing tests with the user pending.
 
 ## Next
-1. Deploy everything together after the user's discussion of the continuity research (Rem):
-   `docker compose -f docker-compose.yml -f docker-compose.private.yml up -d --build app`; decide MANGA_B /
-   MANGA_CONT (both default on in code; MANGA_B=0 in docker-compose.yml today).
-2. Open points: one doubled person left in sequential pages (prev-panel ref); stray speech bubbles/sign text; shoes drift with upper-body sheets (put shoes in Looks); Director model
-   choice (qwen36 switch mode recommended; 8B on the 3060 needs a router preset with device=CUDA1 = models.ini change).
-3. Private / Continue choice at start (not built).
+1. GPU tests WITH the user (Rem: tomorrow, 2026-10-26), on the test app :8290 after rebuild: sketch -> picture
+   with each model; prompt-only per model; Make character with an edited list (pictures match the list); Edit of
+   a waiting panel. Then deploy only on the user's yes.
+2. Finish round p2 scoring (needs judge-3060 + freed ComfyUI): `python3 tests/judge_views.py
+   http://127.0.0.1:11500 $B/p2/views`, `python3 tests/judge_panels.py http://127.0.0.1:11500 $B/p2`; final table.
+3. Backgrounds: plan the room layout once, draw views from it (both reviewers' advice after p2 views).
+4. Ideas reported, not built: save the user's edited set-up list as their default; user-added outfits are not
+   auto-picked as panel refs.
+5. Older open points: over-the-shoulder still weakest; stray bubbles/sign text; shoes drift; Private / Continue
+   choice at start.
 
 ## Blockers / waiting on
-- Nothing. Deployed ef7ee07..b65536e private mode 2026-10-25 (backup image local/comfymanga:pre-deploy-20261025).
+- GPU drawing tests wait for the user (2026-10-26). Deploy of 2418b93..4f14ceb waits for the user's yes.
+- klein base 9B: HF account must accept the FLUX non-commercial licence (user's click; never fill forms for them).
 
 ## Decisions
 - 2026-10-24: one app at / (chat, gallery, characters, page). Old /studio and /demo routes removed from app.py
@@ -47,6 +59,10 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
   the app keeps the only lasting copy on disk.
 - 2026-10-24: Anima chat negative adds swimsuit/bikini/lingerie/underwear/cleavage/text (it drifted to glamour
   shots on a plain prompt).
+- 2026-10-25: model licences / training data are not a concern for these personal tests (user via Rem); UI keeps
+  only practical notes per model.
+- 2026-10-25: chat models = klein (edits, sketches, characters), Anima, Manga Vision (no character sets: they can't
+  edit pictures). Anima + sketch = LLLite control; Anima + character = IP-Adapter.
 - Character ranking: drifted = face sim < set median - 0.15; outfits always kept unless drifted (whole-picture
   similarity punishes new clothes). Heuristic; no real "other person" case seen yet in tests.
 
@@ -66,9 +82,20 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
 - Never delete in ~/Documents/Personal/manga. Never look at the user's own pictures (ram-backup, gallery):
   tests use the test instance with its own data (~/scratch/mangaapp/testdata).
 - Rebuilding/restarting the app no longer loses jobs; restarting ComfyUI re-sends the running job.
+- Live app runs with logging driver "none" (private): no server logs to debug from; reproduce on the test app.
+- `pkill -f <pattern>` can match your own shell and kill it; use exact PIDs.
 - Old work/out holds unclothed rejects from the studio era: never show or publish.
 
 ## Key paths & commands
+- Rollback of the 2026-10-25 deploy: `docker tag local/comfymanga:pre-deploy-20261025b local/comfymanga:latest &&
+  docker compose -f docker-compose.yml -f docker-compose.private.yml up -d --no-build --force-recreate app`.
+- Deploy (private mode only, user's yes first): `docker compose -f docker-compose.yml -f docker-compose.private.yml
+  up -d --build app`.
+- Benches p2: tests/{panelset,viewset,bench_panels,bench_views,judge_panels,judge_views}.py; results
+  ~/scratch/mangafix/testdata/bench/panels/{p2,p2hard,p2/views}/ (contact*.png, judge.json, codex/gemini json).
+  VLM judge: container judge-3060 on 127.0.0.1:11500 (qwen3-vl-8b); run judges as plain `python3 tests/judge_*.py`.
+- UI checks without GPU: ~/scratch/mangafix/pw/{sketch_ui,edit_ui}.py in local/pw-test:1.52; shots ~/scratch/mangafix/p2/ui/.
+- Civitai key ~/.config/civitai/token (600); HF token ../comfyui/.hf_token. Never print either.
 - Live: http://127.0.0.1:8289 (phone http://192.168.0.235:8289); ComfyUI :8288. `docker compose up -d` here.
 - Test instance (:8290, own data): `docker build -t local/comfymanga:test chat && TEST_DATA=~/scratch/mangaapp/testdata
   docker compose -f docker-compose.test.yml up -d`; flows: `docker run --rm --network host --ipc=host -u 1000
