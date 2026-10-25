@@ -55,6 +55,8 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     Sketch: klein best (all judges). Modify: near tie (Codex klein, Gemini Qwen); Qwen better for New-picture scene/
     action. Blind A/B page for the user: https://claude.ai/artifact/Msh9dySQ34EWfpAcGKz5Jv (picks in its db
     collection "picks"; key in r1/<round>/key.json: modify A=qwen B=klein, sketch A=qwen B=anima C=klein).
+  - 2026-10-26 user picks -> defaults in the test build: sketch = Anima ("Manga look"; klein = "Exact layout"),
+    Modify Small = klein, Modify New = Qwen-Edit (switch still there). Checked at 360 px.
 
 ## Next
 0. 2026-10-26: PC rebooting into Windows. To resume the tests: `docker compose up -d comfyui` then
