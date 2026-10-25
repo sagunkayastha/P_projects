@@ -173,8 +173,9 @@ const pending = new Map();  // ckey -> {text, shape, chars, state, error}
 let msgs = [];
 const rendered = new Map();  // message id -> {sig, node}
 const MODELS = { klein: "klein", anima: "Anima", vision: "Manga Vision" };  // klein 9B (default); the others are Anima models
-let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein") };
+let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein"), edit: "small" };
 const log = $("#log"), text = $("#text");
+const PH = text.placeholder;
 
 function setChat(id) {
   chatId = id; LS.set("manga-chat", id);
@@ -217,7 +218,7 @@ function chatImages() { return msgs.filter((m) => m.job && m.job.image_id).map((
 
 function renderMsg(m) {
   const j = m.job;
-  const tag = [(m.chars || []).length ? "with " + m.chars.join(", ") : "", MODELS[m.model] && m.model !== "klein" ? MODELS[m.model] : ""].filter(Boolean).join(" · ");
+  const tag = [m.edit === "new" ? "New picture" : m.edit === "small" ? "Small change" : "", (m.chars || []).length ? "with " + m.chars.join(", ") : "", MODELS[m.model] && m.model !== "klein" ? MODELS[m.model] : ""].filter(Boolean).join(" · ");
   const who = tag ? el("span", { class: "who", text: tag }) : null;
   const res = el("div", { class: "res" });
   if (j && j.image_id) {
@@ -292,8 +293,10 @@ async function send() {
   const t = text.value.trim();
   if ($("#sketchrow").classList.contains("busy")) { toast("The sketch is still uploading"); return; }
   if (!t && !state.sketch) { text.focus(); return; }
+  if (!t && state.sketch.mod) { text.focus(); toast("Say what to change first"); return; }
   const key = uid();
-  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: state.model, state: "sending" });
+  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: state.model,
+    edit: state.sketch && state.sketch.mod ? state.edit : null, state: "sending" });
   text.value = ""; LS.set("manga-draft", ""); autosize(); setSketch(null);
   renderChat(); log.scrollTop = log.scrollHeight;
   await sendPending(key);
@@ -305,7 +308,7 @@ async function sendPending(key) {
   try {
     await ensureChat();
     const m = await api("POST", `/api/chats/${chatId}/messages`, { text: p.text, shape: p.shape, chars: p.chars, ckey: key, model: p.model,
-      ...(p.sketch ? { sketch: p.sketch.id } : {}) });
+      ...(p.sketch ? { sketch: p.sketch.id } : {}), ...(p.edit ? { edit: p.edit } : {}) });
     pending.delete(key);
     if (!msgs.find((x) => x.id === m.id)) msgs.push(m);
     renderChat(); log.scrollTop = log.scrollHeight;
@@ -342,18 +345,19 @@ function editMsg(m) {  // put this message back in the box to change it; sending
   text.value = m.text; LS.set("manga-draft", text.value); autosize();
   state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars); paintChips();
   if (m.shape) { state.shape = m.shape; LS.set("manga-shape", state.shape); paintChips(); }
-  setSketch(m.sketch ? { id: m.sketch } : null);
+  if (m.edit) { state.edit = m.edit; }
+  setSketch(m.sketch ? { id: m.sketch, mod: !!m.edit } : null);
   if (m.model) { state.model = m.model; LS.set("manga-model", state.model); paintChips(); }
   text.focus(); text.setSelectionRange(text.value.length, text.value.length);
   toast("Change the text, then ➤ to draw it again");
 }
-function modifyPic(m) {  // this picture as the source + its prompt in the box: change the words, send (klein edits it)
-  text.value = m.text || ""; LS.set("manga-draft", text.value); autosize();
+function modifyPic(m) {  // this picture as the source, empty box: say what to change (or what new picture), send (klein)
+  text.value = ""; LS.set("manga-draft", ""); autosize();
   state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars);
   state.model = "klein"; LS.set("manga-model", state.model); paintChips();
+  state.edit = "small";
   setSketch({ id: m.job.image_id, mod: true });
-  text.focus(); text.setSelectionRange(text.value.length, text.value.length);
-  toast("Picture added. Change the words (e.g. remove the scar), then ➤");
+  text.focus();
 }
 async function stopJob(jid) {
   try { await api("POST", `/api/jobs/${jid}/cancel`); refresh(); } catch (e) { toast(e.message, { err: true }); }
@@ -365,7 +369,13 @@ function setSketch(sk) {
   const row = $("#sketchrow");
   row.hidden = !sk; row.classList.remove("busy");
   if (sk) $("#sketchimg").src = sk.local || thumbUrl(sk.id);
-  $("#sketchtxt").textContent = sk && sk.mod ? "Changes this picture. Say what to change." : "The picture follows your sketch's layout. Say what it shows (optional).";
+  const mod = !!(sk && sk.mod), nw = mod && state.edit === "new";
+  $("#editmode").hidden = !mod;
+  for (const b of $("#editmode").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === state.edit);
+  $("#sketchtxt").textContent = !mod ? "The picture follows your sketch's layout. Say what it shows (optional)."
+    : nw ? "Same character, new pose, camera or scene." : "Changes only what you name. New pose or camera: New picture.";
+  text.placeholder = !mod ? PH : nw ? "New picture: e.g. front view, in a rainy neon street at night"
+    : "What to change? e.g. cyberpunk outfit, remove the scar, add glasses";
   $("#shape").classList.toggle("off", !!sk);
   $("#sketchbtn").classList.toggle("on", !!sk);
 }
@@ -390,6 +400,10 @@ $("#modelbtn").addEventListener("click", () => {  // tap: next model, for the ne
   state.model = ks[(ks.indexOf(state.model) + 1) % ks.length]; LS.set("manga-model", state.model); paintChips();
 });
 $("#sketchx").addEventListener("click", () => setSketch(null));
+$("#editmode").addEventListener("click", (e) => {  // Modify: small change of this picture / new picture of the character
+  const b = e.target.closest("button"); if (!b) return;
+  state.edit = b.dataset.v; setSketch(state.sketch); text.focus();
+});
 $("#sketchfile").addEventListener("change", async (e) => {
   const f = e.target.files && e.target.files[0];
   e.target.value = "";

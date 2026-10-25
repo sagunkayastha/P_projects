@@ -215,6 +215,28 @@ def _sketch_job(text, sketch, chars, owner, seed=None):
     return worker.add_job("image", params, owner)
 
 
+# Modify of a finished picture (image 1): a change to it, or a new picture of the same character(s)
+EDIT = {"small": "Edit image 1, a finished picture. Change: {what}. Keep everything the change does not name exactly as in "
+                 "image 1: the same person, face, style and background.",
+        "new": "Image 1 shows the character: keep their face, hair and clothes exactly as in image 1. Draw a new picture of "
+               "them: {what}. New pose and new camera; do not copy the pose or framing of image 1."}
+
+
+def _edit_job(text, src, edit, chars, owner, seed=None):
+    """Modify: klein with the picture as image 1 (and character sheets after it)."""
+    row = db.get("images", src)
+    w, h = graphs.fit_size(min(2.0, max(0.5, row["w"] / row["h"])), 1.0)
+    refs, cast = _cast(chars, text) if chars else ([], [])
+    who = f" {writer.cast_text(cast, start=2)} Same face, hair and clothes as the reference sheets." if chars else ""
+    prompt = (f"{EDIT[edit].format(what=text.strip().rstrip('.'))}{who} {pagejobs.ONE} {graphs.STYLE} "
+              "No text, no letters, no speech bubbles.").replace("  ", " ")
+    params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "refs": [src] + refs,
+              "sketch": src, "edit": edit}
+    if chars:
+        params["chars"] = [c["slug"] for c in chars]
+    return worker.add_job("image", params, owner)
+
+
 def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima"):
     """Anima (trained on scraped anime art; the user's choice): text only, or steered by the sketch (lineart
     control) and the first character's picture (IP-Adapter: the face drifts more than with klein)."""
@@ -234,9 +256,11 @@ def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima")
     return worker.add_job("image", params, owner)
 
 
-def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein"):
+def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", edit=None):
     if model in graphs.UNETS:  # Anima (beretMix) or Manga Vision
         return _anima_job(text, shape, chars, owner, seed, sketch, model)
+    if sketch and edit in EDIT and text.strip():
+        return _edit_job(text, sketch, edit, chars, owner, seed)
     if sketch:
         return _sketch_job(text, sketch, chars, owner, seed)
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
@@ -276,9 +300,12 @@ def send(cid: int, body: dict = Body(...)):
     shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
     chars = _ready_chars(body.get("chars"))
     model = body.get("model") if body.get("model") == "klein" or body.get("model") in graphs.UNETS else "klein"
+    edit = body.get("edit") if sketch and body.get("edit") in EDIT else None
+    if edit and not text:
+        raise HTTPException(400, "say what to change")
     mid = db.insert("messages", chat_id=cid, text=text, shape=shape, chars=[ch["slug"] for ch in chars], ckey=ckey,
-                    sketch=sketch, model=model)
-    jid = _chat_job(text, shape, chars, f"msg:{mid}", sketch=sketch, model=model)
+                    sketch=sketch, model=model, edit=edit)
+    jid = _chat_job(text, shape, chars, f"msg:{mid}", sketch=sketch, model=model, edit=edit)
     db.update("messages", mid, job_id=jid)
     if not c["title"]:
         db.update("chats", cid, title=text[:60] or "sketch")
@@ -296,9 +323,10 @@ def again(mid: int, body: dict = Body(default={})):
     seed = old["params"].get("seed") if old and (body or {}).get("seed") == "same" else None
     sketch = m.get("sketch") if m.get("sketch") and db.get("images", m["sketch"]) else None
     model = m.get("model") or "klein"
+    edit = m.get("edit") if sketch else None
     nid = db.insert("messages", chat_id=m["chat_id"], text=m["text"], shape=m["shape"], chars=m["chars"] or [],
-                    sketch=sketch, model=model)
-    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}", seed, sketch, model)
+                    sketch=sketch, model=model, edit=edit)
+    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}", seed, sketch, model, edit)
     db.update("messages", nid, job_id=jid)
     return _msg_view(db.get("messages", nid))
 

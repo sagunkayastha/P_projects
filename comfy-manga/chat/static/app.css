@@ -74,6 +74,8 @@ main { flex: 1; min-height: 0; position: relative; }
 .sketchrow { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--dim); }
 .sketchrow img { width: 56px; height: 56px; object-fit: contain; background: #fff; border-radius: 8px; flex: none; }
 .sketchrow span { flex: 1; }
+.sketchmid { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sketchmid .seg { width: max-content; }
 .sketchrow.busy img { opacity: .4; }
 .me .sk { display: block; width: 72px; height: 72px; object-fit: contain; background: #fff; border-radius: 8px;
   margin-bottom: 6px; }

@@ -65,6 +65,8 @@ def init():
         _conn.execute("ALTER TABLE messages ADD COLUMN sketch INTEGER")
     if "model" not in mcols:  # added 2026-10-25: "klein" (default), "anima" or "vision"; NULL = before the choice existed
         _conn.execute("ALTER TABLE messages ADD COLUMN model TEXT")
+    if "edit" not in mcols:  # added 2026-10-26: Modify of a picture: "small" (change) or "new" (new picture); NULL = sketch
+        _conn.execute("ALTER TABLE messages ADD COLUMN edit TEXT")
     pcols = {r[1] for r in _conn.execute("PRAGMA table_info(pages)")}
     for col, typ in (("bible", "TEXT"), ("scene", "TEXT"), ("seed", "INTEGER")):  # added 2026-10-24
         if col not in pcols:

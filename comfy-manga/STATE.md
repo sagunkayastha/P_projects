@@ -37,6 +37,11 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     up; prompt-only drew fine with klein (~11 s), Anima (~20 s), Manga Vision (~19 s). Tests with the user running.
   - ✎ Modify on every chat picture (user ask via Rem): picture becomes the source (klein edit) + its prompt in the box.
     Checked at 360 px: prompt + source loaded, chip row fits (2 lines, nothing cut), edit 'give her glasses' kept layout.
+  - 2026-10-26 Modify v2 (user yes to 3 fixes): own edit prompt (app.py EDIT/_edit_job, messages.edit column),
+    modes Small change (default) / New picture, empty box with hint. Re-run of the user's cases
+    (~/scratch/mangafix/modify/rerun.png): cyberpunk clothing OK, cyberpunk theme OK (background), long bob OK but
+    hair turns light grey, front view fails in Small change but works in New picture (hint says so).
+    New picture still copies the pose when the words name none (cafe test kept the sitting pose: new_cafe.png).
 
 ## Next
 1. GPU tests WITH the user (Rem: tomorrow, 2026-10-26), on the test app :8290 after rebuild: sketch -> picture
