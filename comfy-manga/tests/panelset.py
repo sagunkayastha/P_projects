@@ -113,3 +113,76 @@ def stick_png(name, w, h):
     buf = io.BytesIO()
     im.save(buf, "PNG")
     return buf.getvalue()
+
+
+# round p2 (C): the shots no variant drew in p1, plus one more of each kind
+HARD = [SET[1], SET[6], SET[4],
+        {"name": "otsnori", "who": ["nori", "bram"], "shape": "wide",
+         "line": "Over-the-shoulder shot from behind Nori, looking at Bram behind the counter of his clock shop",
+         "checks": {"angle": "Is it an over-the-shoulder shot: the young woman's back/shoulder (short black hair) big "
+                             "in the foreground, the old bearded man facing the camera further away?",
+                    "pose": "Is the old bearded man standing behind a counter, facing the young woman?",
+                    "place": "Is it inside a clock shop (clocks on the walls, a counter)?"}},
+        {"name": "handsbook", "who": ["nori"], "shape": "square",
+         "line": "Close-up of Nori's hands opening an old book on a library table",
+         "checks": {"angle": "Is it a close-up where the HANDS and the book fill most of the picture (face not the main "
+                             "subject)?",
+                    "pose": "Are the hands opening or holding an open book?",
+                    "place": "Is the book on a table (library or desk detail)?"}},
+        {"name": "topcafe", "who": ["nori"], "shape": "square",
+         "line": "Top-down view of Nori sitting at a small round cafe table with a cup of tea",
+         "checks": {"angle": "Is the camera directly above, looking straight DOWN (bird's-eye view: we see the top of "
+                             "her head and the table top)?",
+                    "pose": "Is the young woman sitting at a round table with a cup?",
+                    "place": "Is it a cafe table with a cup of tea?"}}]
+
+# filled grey blockouts (near = dark, far = light, props = pale): shapes as fractions of the picture
+NEAR, FAR, PROP = 60, 150, 205
+SIL = {
+    "ots": [("rect", PROP, (.30, .62, 1.0, .72)), ("ell", FAR, (.62, .20, .74, .38)), ("rect", FAR, (.58, .37, .78, .64)),
+            ("ell", NEAR, (.02, .22, .40, .78)), ("poly", NEAR, [(0, 1), (0, .62), (.18, .58), (.36, .62), (.52, 1)])],
+    "otsnori": [("rect", PROP, (0, .60, .70, .72)), ("ell", FAR, (.26, .18, .38, .36)), ("rect", FAR, (.22, .35, .42, .62)),
+             ("ell", NEAR, (.60, .20, .98, .78)), ("poly", NEAR, [(1, 1), (1, .62), (.82, .58), (.64, .62), (.48, 1)])],
+    "hands": [("rect", PROP, (0, .78, 1, 1)), ("poly", NEAR, [(0, .55), (.30, .48), (.46, .56), (.44, .72), (.0, .80)]),
+              ("poly", NEAR, [(1, .52), (.68, .46), (.54, .56), (.56, .72), (1, .82)]),
+              ("ell", 245, (.38, .40, .62, .66)), ("ring", 30, (.38, .40, .62, .66))],
+    "handsbook": [("rect", PROP, (0, .70, 1, 1)), ("poly", 235, [(.12, .40), (.50, .48), (.88, .40), (.88, .78),
+                                                                 (.50, .86), (.12, .78)]),
+                  ("poly", NEAR, [(0, .62), (.14, .46), (.24, .52), (.20, .74), (0, .86)]),
+                  ("poly", NEAR, [(1, .60), (.86, .44), (.76, .50), (.80, .72), (1, .84)])],
+    "topdown": [("rect", 225, (0, 0, 1, 1)), ("ell", NEAR, (.18, .14, .34, .30)), ("poly", NEAR, [(.24, .30), (.40, .24),
+                (.62, .52), (.50, .62)]), ("line", NEAR, [(.26, .33), (.10, .52)]), ("line", NEAR, [(.38, .26), (.56, .10)]),
+                ("line", NEAR, [(.56, .58), (.66, .90)]), ("line", NEAR, [(.58, .55), (.90, .66)])],
+    "topcafe": [("ell", PROP, (.30, .30, .80, .80)), ("ell", 245, (.50, .44, .60, .54)), ("ring", 30, (.50, .44, .60, .54)),
+                ("ell", NEAR, (.08, .30, .38, .68)), ("ell", 25, (.14, .38, .30, .58))],
+}
+
+
+def sil_png(name, w, h):
+    """PNG bytes: the line's grey blockout on white, or None."""
+    import io
+
+    from PIL import Image, ImageDraw
+    if name not in SIL:
+        return None
+    im = Image.new("RGB", (w, h), "white")
+    d = ImageDraw.Draw(im)
+    for kind, g, pts in SIL[name]:
+        c = (g, g, g)
+        if kind in ("rect", "ell", "ring"):
+            box = [pts[0] * w, pts[1] * h, pts[2] * w, pts[3] * h]
+            if kind == "rect":
+                d.rectangle(box, fill=c)
+            elif kind == "ell":
+                d.ellipse(box, fill=c)
+            else:
+                d.ellipse(box, outline=c, width=max(4, w // 120))
+        else:
+            xy = [(x * w, y * h) for x, y in pts]
+            if kind == "poly":
+                d.polygon(xy, fill=c)
+            else:
+                d.line(xy, fill=c, width=max(10, w // 18))
+    buf = io.BytesIO()
+    im.save(buf, "PNG")
+    return buf.getvalue()

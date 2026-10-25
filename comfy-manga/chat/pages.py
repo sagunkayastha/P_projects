@@ -18,6 +18,7 @@ import graphs
 import layout
 import refs
 import worker
+import writer
 
 KEYS = {"location": "location", "place": "location", "time and light": "time_light", "time_light": "time_light",
         "time": "time_light", "light": "time_light", "props": "props", "wardrobe": "wardrobe", "clothes": "wardrobe",
@@ -77,18 +78,7 @@ ONE = "One single picture filling the whole frame: not a comic page, no split sc
 INK = ("Bold confident G-pen ink lines with varied line weight, solid black fills, hatching and screentone dots for "
        "shading, white paper, crisp high-contrast printed manga page look. Heavy outer contours, fine interior lines, "
        "sparse screentone only in shadow planes, no soft airbrush gradients.")
-SHOTS = [(r"close[- ]?up", "Tight close-up: the face fills most of the frame, cropped from forehead to chin, shoulders "
-                           "mostly out of frame."),
-         (r"low[- ]angle|from below|looking up at", "Low-angle shot: the camera is near the ground tilted steeply up, "
-                                                     "strong upward perspective, the figure towers over the viewer."),
-         (r"medium shot", "Medium shot: framed from the waist up, legs out of frame."),
-         (r"\bwide[- ](?:establishing )?shot|establishing", "Wide shot: the whole place is visible and the character is "
-                                                             "small in the frame.")]
-
-
-def shot_text(text):
-    """Spell out the shot the line asks for (klein drew loose bust shots for 'close-up', eye level for 'low angle')."""
-    return " ".join(t for pat, t in SHOTS if re.search(pat, text, re.I))
+SHOTS, shot_text = writer.SHOTS, writer.shot_text  # moved to writer (the prompt starts with the shot)
 
 
 def once_text(names):
@@ -147,8 +137,10 @@ def panel_job(pid, idx, seed=None, prm_extra=None):
         if prev and len(specs) < 4:
             specs.append(prev)
             slots["prev"] = len(specs)
+        text = pn["line"] + " " + pn["prompt"]
+        st = shot_text(text)  # already at the start of prompts written since round p2
         extra = _extras(slots.get("plate"), slots.get("props"), slots.get("prev"), [c["name"] for c in chars],
-                        pn["line"] + " " + pn["prompt"])
+                        "" if st and st in prompt else text)
         if extra:
             prompt = prompt.replace(graphs.STYLE, extra + " " + graphs.STYLE, 1)
     params["prompt"] = prompt

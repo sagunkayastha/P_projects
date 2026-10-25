@@ -15,6 +15,12 @@ Variants
   two_anima (a) same, composition by Anima (beretMix; Danbooru-trained, see licence note in the report)
   stick     (b) sheets + a stick-figure pose/camera guide as the last reference picture
   cfg3      (c) base prompt, cfg 3 + 8 steps (the distilled klein; no non-distilled klein on disk)
+Round p2 (third argument "hard" = panelset.HARD, the shots p1 failed):
+  app       the shipped prompt (writer.template + pages._extras, as pages.panel_job builds it)
+  sil_ref   app + a filled grey blockout (panelset.sil_png) as the last reference picture
+  sil_base  the blockout as image 1 to turn into the scene, then the sheets
+  lllite    Anima + ControlNet-LLLite (blockout as control) composes, klein puts the characters in
+            (Anima = Danbooru-trained: comparison only)
 """
 import json
 import sys
@@ -26,7 +32,7 @@ import pages
 import workflows
 import writer
 from bench_quality import FONT, chars_of, ref_names, run, up
-from panelset import LOOKS, SET, stick_png
+from panelset import HARD, LOOKS, SET, sil_png, stick_png
 
 SEED = 9100
 DESC = {"nori": "a young woman with a short black bob, round glasses, a striped scarf, a long cardigan and a pleated "
@@ -76,6 +82,28 @@ def order_prompt(item, chs):
             f"{graphs.STYLE} No text, no speech bubbles.").replace("  ", " ")
 
 
+def app_prompt(item, chs):
+    """What the app sends today (pages.panel_job without scene pictures)."""
+    p = writer.template(item["line"], [{"name": c["name"], "n": 1, "sheet": True} for c in chs], None)
+    st = pages.shot_text(item["line"])
+    ex = pages._extras(None, None, None, [c["name"] for c in chs], "" if st and st in p else item["line"])
+    return p.replace(graphs.STYLE, ex + " " + graphs.STYLE, 1)
+
+
+SIL_REF = ("Image {n} is a grey blockout of the camera and the layout: dark shapes are near the camera, light shapes "
+           "far away, pale shapes are furniture or objects. Put the people and objects exactly where its shapes are, at "
+           "the same size in the frame, drawn as finished people and things; nothing stays grey or flat.")
+
+
+def sil_base_prompt(item, chs):
+    who = " and ".join(f"{c['name']} (the person in image {2 + i})" for i, c in enumerate(chs))
+    return (f"Image 1 is a grey blockout of this panel: keep its camera, framing and where each shape is (dark = near "
+            f"the camera, light = far, pale = furniture), and turn it into the finished scene: {item['line']}. "
+            f"{pages.shot_text(item['line'])} The people are {who}: their face, hair and clothes from the reference "
+            f"sheet(s). {pages.once_text([c['name'] for c in chs])} Nothing stays grey or flat. {pages.ONE} {pages.INK} "
+            f"{graphs.STYLE} No text, no speech bubbles.").replace("  ", " ")
+
+
 def compose_prompt(item, chs):
     return (f"Manga panel. {generic(item['line'], chs)}. {pages.shot_text(item['line'])} {pages.ONE} {pages.INK} "
             f"{graphs.STYLE} No text, no speech bubbles.").replace("  ", " ")
@@ -118,8 +146,29 @@ def anima_comps(out, v):
         free()
 
 
+def lllite_comps(out, v, items):
+    """Anima + LLLite blockout control compositions in one block, then free the model."""
+    made = False
+    for k, item in enumerate(items):
+        f = out / f"{v}_{k + 1}_{item['name']}_comp.png"
+        if f.exists():
+            continue
+        chs = chars_of(item["who"])
+        w, h = size(item)
+        ctrl = up(sil_png(item["name"], w, h))
+        wf = workflows.anima_control(graphs.ANIMA_PREFIX + generic(item["line"], chs) + ", " +
+                                     pages.shot_text(item["line"]) + ", detailed manga illustration", ctrl, w, h,
+                                     SEED + k, "p", 1.0, 0.6, neg_extra="swimsuit, bikini, text, speech bubble")
+        f.write_bytes(run(graphs._preview(wf)))
+        made = True
+        print(v, "comp", item["name"], flush=True)
+    if made:
+        free()
+
+
 def main():
     rnd, variants = sys.argv[1], sys.argv[2].split(",")
+    items = HARD if sys.argv[3:] == ["hard"] else SET
     db.init()
     out = db.APP_DIR.parent / "bench" / "panels" / rnd
     out.mkdir(parents=True, exist_ok=True)
@@ -128,7 +177,9 @@ def main():
         pics, t0 = [], time.time()
         if v == "two_anima":
             anima_comps(out, v)
-        for k, item in enumerate(SET):
+        if v == "lllite":
+            lllite_comps(out, v, items)
+        for k, item in enumerate(items):
             f = out / f"{v}_{k + 1}_{item['name']}.png"
             chs = chars_of(item["who"])
             w, h = size(item)
@@ -136,7 +187,23 @@ def main():
             if f.exists():
                 pics.append(f.read_bytes())
                 continue
-            if v in ("base", "cfg3", "stick", "order"):
+            if v in ("app", "sil_ref"):
+                names, _ = ref_names(chs, item["line"], "sheet")
+                pr = app_prompt(item, chs)
+                if v == "sil_ref":
+                    names.append(up(sil_png(item["name"], w, h)))
+                    pr = pr.replace(graphs.STYLE, SIL_REF.format(n=len(names)) + " " + graphs.STYLE, 1)
+                data = run(klein_r(pr, names, w, h, seed))
+            elif v == "sil_base":
+                names, _ = ref_names(chs, item["line"], "sheet")
+                pr = sil_base_prompt(item, chs)
+                data = run(klein_r(pr, [up(sil_png(item["name"], w, h))] + names, w, h, seed))
+            elif v == "lllite":
+                comp = (out / f"{v}_{k + 1}_{item['name']}_comp.png").read_bytes()
+                names, _ = ref_names(chs, item["line"], "sheet")
+                pr = insert_prompt(item, chs, 2)
+                data = run(klein_r(pr, [up(comp)] + names, w, h, seed))
+            elif v in ("base", "cfg3", "stick", "order"):
                 names, _ = ref_names(chs, item["line"], "sheet")
                 pr = order_prompt(item, chs) if v == "order" else base_prompt(item, chs)
                 if v == "stick":
@@ -169,13 +236,17 @@ def main():
             pics.append(data)
             prompts[f"{v}/{item['name']}"] = pr
             print(v, item["name"], flush=True)
-        times[v] = round((time.time() - t0) / len(SET), 1)
+        times[v] = round((time.time() - t0) / len(items), 1)
         rows.append(pics)
-    sheet(rows, [f"{v}\n{times[v]} s" for v in variants], out / "contact.png")
+    heads = [f"{k + 1} {item['name']}" for k, item in enumerate(items)]
+    if items is HARD:  # first row: the blockouts
+        rows.insert(0, [sil_png(i["name"], *size(i)) for i in items])
+        variants, times = ["blockout"] + variants, {"blockout": 0, **times}
+    sheet(rows, [f"{v}\n{times[v]} s" for v in variants], out / "contact.png", heads)
     old = json.loads((out / "prompts.json").read_text()) if (out / "prompts.json").exists() else {}
     old.setdefault("prompts", {}).update(prompts)
     old.setdefault("sec_per_panel", {}).update({v: t for v, t in times.items() if t > 1})
-    old["set"] = SET
+    old["set"] = items
     (out / "prompts.json").write_text(json.dumps(old, indent=1))
     print(json.dumps(times))
 

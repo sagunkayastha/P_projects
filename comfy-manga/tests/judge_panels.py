@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 from judge_continuity import ask, word
-from panelset import LOOKS, SET
+from panelset import HARD, LOOKS, SET
 
-BY = {s["name"]: s for s in SET}
+BY = {s["name"]: s for s in SET + HARD}
 ANGLES = ["EYE-LEVEL", "LOW-ANGLE", "HIGH-ANGLE", "TOP-DOWN", "OVER-THE-SHOULDER", "BACK-VIEW", "CLOSE-UP"]
 
 

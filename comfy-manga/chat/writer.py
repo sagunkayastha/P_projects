@@ -32,6 +32,20 @@ def cast_text(chars):
     return "; ".join(parts) + "." if parts else ""
 
 
+SHOTS = [(r"close[- ]?up", "Tight close-up: the face fills most of the frame, cropped from forehead to chin, shoulders "
+                           "mostly out of frame."),
+         (r"low[- ]angle|from below|looking up at", "Low-angle shot: the camera is near the ground tilted steeply up, "
+                                                     "strong upward perspective, the figure towers over the viewer."),
+         (r"medium shot", "Medium shot: framed from the waist up, legs out of frame."),
+         (r"\bwide[- ](?:establishing )?shot|establishing", "Wide shot: the whole place is visible and the character is "
+                                                             "small in the frame.")]
+
+
+def shot_text(text):
+    """Spell out the shot the line asks for (klein drew loose bust shots for 'close-up', eye level for 'low angle')."""
+    return " ".join(t for pat, t in SHOTS if re.search(pat, text, re.I))
+
+
 def template(scene, chars, framing, bible=""):
     keep = (("Keep each character's face, hair and clothes exactly as in the reference pictures. " if refs.CONT else
              "Keep each character's face, hair, body and outfit exactly as in the reference pictures. ") if chars else "")
@@ -40,6 +54,11 @@ def template(scene, chars, framing, bible=""):
     chars = [{**c, "n": c.get("n", n), "sheet": c.get("sheet", refs.CONT)} for c in chars]
     scene = scene.strip().rstrip(".") + "."
     same = f"Same in every panel of this page: {bible.strip().rstrip('.')}. " if bible else ""
+    if refs.CONT:  # panel round p1 (tests/bench_panels.py "order"): the line and its shot first, short
+        keep = ("Same face, hair and clothes as the reference sheets; the pose and camera come only from this text. "
+                if chars else "")
+        return (f"{shot}{scene} {shot_text(scene)} {cast_text(chars)} {same}{keep}{graphs.STYLE} "
+                "No text, no speech bubbles.").replace("  ", " ")
     return (f"Manga panel. {shot}{cast_text(chars)} Scene: {scene} {same}{keep}{graphs.STYLE} "
             "The drawing fills the whole picture edge to edge. No text, no letters, no speech bubbles, no panel borders, "
             "no white bars.").replace("  ", " ")
