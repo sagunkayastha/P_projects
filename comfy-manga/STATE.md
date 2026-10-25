@@ -35,6 +35,8 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
   - Panel Edit works while the page still draws (waiting panel takes the new line) — 72ab6a5.
   - UI checked in Playwright without GPU. 2026-10-26: test image rebuilt from 227999e, test app :8290 + comfyui-manga
     up; prompt-only drew fine with klein (~11 s), Anima (~20 s), Manga Vision (~19 s). Tests with the user running.
+  - ✎ Modify on every chat picture (user ask via Rem): picture becomes the source (klein edit) + its prompt in the box.
+    Checked at 360 px: prompt + source loaded, chip row fits (2 lines, nothing cut), edit 'give her glasses' kept layout.
 
 ## Next
 1. GPU tests WITH the user (Rem: tomorrow, 2026-10-26), on the test app :8290 after rebuild: sketch -> picture

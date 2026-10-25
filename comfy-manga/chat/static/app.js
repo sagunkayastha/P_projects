@@ -224,6 +224,7 @@ function renderMsg(m) {
     const img = el("img", { src: thumbUrl(j.image_id, "m"), alt: m.text, width: j.w, height: j.h, loading: "lazy" });
     img.addEventListener("click", () => { const L = chatImages(); openViewer(L, L.findIndex((x) => x.id === j.image_id)); });
     res.append(img, el("div", { class: "acts" },
+      el("button", { class: "btn", onclick: () => modifyPic(m) }, "✎ Modify"),
       el("a", { class: "btn", href: imgUrl(j.image_id) + "&dl=1", download: "" }, "⬇ Save"),
       el("button", { class: "btn star", onclick: () => makeCharSheet(j.image_id) }, "★ Make character")),
       el("div", { class: "retry" }, "Try again:",
@@ -346,6 +347,14 @@ function editMsg(m) {  // put this message back in the box to change it; sending
   text.focus(); text.setSelectionRange(text.value.length, text.value.length);
   toast("Change the text, then ➤ to draw it again");
 }
+function modifyPic(m) {  // this picture as the source + its prompt in the box: change the words, send (klein edits it)
+  text.value = m.text || ""; LS.set("manga-draft", text.value); autosize();
+  state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars);
+  state.model = "klein"; LS.set("manga-model", state.model); paintChips();
+  setSketch({ id: m.job.image_id, mod: true });
+  text.focus(); text.setSelectionRange(text.value.length, text.value.length);
+  toast("Picture added. Change the words (e.g. remove the scar), then ➤");
+}
 async function stopJob(jid) {
   try { await api("POST", `/api/jobs/${jid}/cancel`); refresh(); } catch (e) { toast(e.message, { err: true }); }
 }
@@ -356,6 +365,7 @@ function setSketch(sk) {
   const row = $("#sketchrow");
   row.hidden = !sk; row.classList.remove("busy");
   if (sk) $("#sketchimg").src = sk.local || thumbUrl(sk.id);
+  $("#sketchtxt").textContent = sk && sk.mod ? "Changes this picture. Say what to change." : "The picture follows your sketch's layout. Say what it shows (optional).";
   $("#shape").classList.toggle("off", !!sk);
   $("#sketchbtn").classList.toggle("on", !!sk);
 }
