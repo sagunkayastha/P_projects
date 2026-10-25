@@ -1,6 +1,15 @@
 # comfy-manga — STATE-LOG (newest first)
 
 
+## 2026-10-25 — panel adherence round p1: "order" prompt best; one shared place picture is why panels repeat the camera ⚠️ (rem-mangafix)
+- tests/panelset.py (8 lines + yes/no checks), bench_panels.py, bench_bg.py, judge_panels.py; results in
+  testdata/bench/panels/p1/. Adherence (VLM / Codex / Gemini): base 88/83/71, order 92/92/71 (best), noref 79/83/71,
+  two_klein 83/83/71, stick 88/92/71 (3 people on bridge), cfg3 88/83/71 (2x time), two_anima (scraped-data model,
+  comparison only) 83/54/63. All fail over-the-shoulder + hands close-up. Character refs do not freeze the camera.
+- Backgrounds: same wide plate for every panel -> 2-3 of 4 panels copy its camera; words only -> room changes.
+  Next idea: several empty room views (one per direction), each panel gets the view it faces.
+- klein base 9B: all BFL repos gated (403) until the HF account accepts the FLUX non-commercial licence.
+
 ## 2026-10-25 (early) — phone Edit confirmed on the Samsung; bug 3 not reproduced (1 cause fixed); quality rounds -> ink + shot + "once" wording ✅ (rem-mangafix)
 - Phone (Samsung via adb on archbox, test instance :8290): Edit while drawing, typing with keyboard up, Redo, and a
   second edit all work (ef7ee07). Shots ~/scratch/mangafix/phone/phone_edit_strip.png.
