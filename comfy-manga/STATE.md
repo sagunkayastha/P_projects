@@ -1,5 +1,5 @@
 # comfy-manga — STATE
-Updated: 2026-10-24 23:30 (MDT) · by rem-mangafix (Claude, PC laanta-chy)
+Updated: 2026-10-25 00:30 (MDT) · by rem-mangafix (Claude, PC laanta-chy)
 
 ## Goal
 Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU 0): chat -> pictures,
@@ -24,18 +24,20 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     characters its line names) -> page 1500x2250: top strip, right big + left narrow with slanted gutter, bottom
     strip, read right to left, speech bubbles from "quoted" text. Redo one panel re-composes. ~75 s per page.
     Panel prompts: local LLM only if a model is already loaded in the llama.cpp router, else template.
-- Not tested on the real Samsung: no phone on USB/adb. (192.168.0.179:5555 = AT&T TV box, left alone.)
+- Samsung tested 2026-10-25 (adb RZCR908FCPN on archbox): per-panel Edit/Redo works with ef7ee07.
+- Built, not deployed (ef7ee07..b65536e): phone fixes, queue/progress, busy-pick fix, refs on page card, ink + shot
+  + "exactly once" panel wording (quality rounds, see STATE-LOG 2026-10-25).
 
 ## Next
 1. Deploy everything together after the user's discussion of the continuity research (Rem):
    `docker compose -f docker-compose.yml -f docker-compose.private.yml up -d --build app`; decide MANGA_B /
    MANGA_CONT (both default on in code; MANGA_B=0 in docker-compose.yml today).
-2. Open points: close-ups come out medium; shoes drift with upper-body sheets (put shoes in Looks); Director model
+2. Open points: one doubled person left in sequential pages (prev-panel ref); stray speech bubbles/sign text; shoes drift with upper-body sheets (put shoes in Looks); Director model
    choice (qwen36 switch mode recommended; 8B on the 3060 needs a router preset with device=CUDA1 = models.ini change).
-3. Phone test on the Samsung (ask Rem first). Private / Continue choice at start (not built).
+3. Private / Continue choice at start (not built).
 
 ## Blockers / waiting on
-- User's discussion of the research + go for the deploy.
+- User's yes for the deploy (ef7ee07..b65536e).
 
 ## Decisions
 - 2026-10-24: one app at / (chat, gallery, characters, page). Old /studio and /demo routes removed from app.py
@@ -56,6 +58,7 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
   overrides); LLM up stops comfyui-manga (both need the 5070 Ti), LLM down starts it again.
 
 ## Gotchas / do-not
+- RAM: ComfyUI with klein 9B ~12.7 GB; free it (POST :8288/free) before running a llama.cpp judge; stop at <4 GB.
 - The user may be working in the PRIVATE session (RAM only): never restart/recreate manga-app or comfyui-manga,
   and never queue test jobs on comfyui-manga, without asking Rem. Test instances share comfyui-manga's queue
   (docker-compose.test.yml): for UI tests without GPU use the isolated setup (mock LLM, COMFY_URL=nowhere, see log).

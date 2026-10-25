@@ -1,6 +1,21 @@
 # comfy-manga — STATE-LOG (newest first)
 
 
+## 2026-10-25 (early) — phone Edit confirmed on the Samsung; bug 3 not reproduced (1 cause fixed); quality rounds -> ink + shot + "once" wording ✅ (rem-mangafix)
+- Phone (Samsung via adb on archbox, test instance :8290): Edit while drawing, typing with keyboard up, Redo, and a
+  second edit all work (ef7ee07). Shots ~/scratch/mangafix/phone/phone_edit_strip.png.
+- Bug 3 (other character after LLM up/down): full cycle on the test instance drew the right person; refs verified
+  in job params + ComfyUI history; not the name, not the LLM writer, not the Describe text. Fixed: Make page
+  silently unpicked a briefly busy character (bca5a88); page card shows each panel's refs; panel fails if a
+  character has no pictures (959727b).
+- Quality r1 (11 variants, tests/bench_quality.py, Codex gpt-6.1-sol + Gemini 3.8 Flash + qwen3-vl-8b judge):
+  best inkwords (8/9 vs base 7/7); klein 4B doubles people (4/4); Anima pass 0.5 changes identity, 0.35 3x slower
+  no gain; steps 8/12 small gain for +25-60% time; full-picture refs copy pose. r2: ink2_all (ink2 + shot words +
+  "exactly once") best for both reviewers (8 / 8.8). Doubled-person test (tests/exp_double.py, 48 panels):
+  plain 3/12, prev 3/12, once 1/12, prev+once 0/12. Shipped in pages._extras (b65536e). Page check: doubled
+  panels Bram 3/4 -> 1/4, Nori 1 -> 0; close-ups now real close-ups. Not deployed.
+- RAM: klein 9B in ComfyUI = ~12.7 GB RAM; llama-server judge had 7 GB in zram -> ran out once (jobs reaped).
+  Run the judge only with ComfyUI's cache freed (POST /free). PC auto-sleeps after 2 h idle.
 
 ## 2026-10-24 (night) — continuity + pose fix built and measured; director models benchmarked; deploy still waits ⚠️ (rem-mangafix)
 - New pages.py (MANGA_CONT, default on): no default shot per panel slot; scene bible -> place plate + prop sheet
