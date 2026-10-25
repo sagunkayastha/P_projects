@@ -63,6 +63,13 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     Colour round c1 (6 cases x 2 seeds x klein/Qwen/Anima, ~/scratch/mangafix/ab/c1, key.json A=qwen B=klein
     C=anima); blind page https://claude.ai/artifact/4fJpZWJ7DaMUw22yCggUX1. Anima (both manga fine-tunes) stays B/W
     in colour mode, even with 'monochrome' in its negative.
+  - 2026-10-26 user's simple setup (test build): B/W chat = Anima, sketch = Anima "Manga look" (klein "Exact
+    layout"), Modify Small = klein, New = Qwen-Edit, Colour/Cover/Chapter art = Qwen-Edit (user liked Qwen on the
+    colour page). Model chip hidden; #debug in the URL shows it again (incl. the 2-stage test).
+  - 2-stage "Anima look" pipeline (helper -> Anima LLLite 1.0/60% + IP-Adapter -> Qwen colour; graphs.pipeline,
+    model "look") is built but only in #debug. OPEN ISSUES (stopped by the user, too long): (1) Modify New loses
+    identity (Anima's prompt has only the change words; idea: use the source picture's own text + traits);
+    (2) covers with two characters merge into one (IP-Adapter of the first character; without ipref both stay).
 
 ## Next
 0. 2026-10-26: PC rebooting into Windows. To resume the tests: `docker compose up -d comfyui` then

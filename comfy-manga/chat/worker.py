@@ -117,7 +117,8 @@ def _graph(job):
         if p.get("sketch") or p.get("ipref"):
             return "anima", graphs.anima_guided(p["prompt"], p["w"], p["h"], p["seed"],
                                                 _upload(p["sketch"]) if p.get("sketch") else None,
-                                                _upload(p["ipref"]) if p.get("ipref") else None, p["model"])
+                                                _upload(p["ipref"]) if p.get("ipref") else None, p["model"],
+                                                *p.get("ctrl", (1.0, 0.6)))
         return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"], p["model"])
     if kind == "image" and p.get("model") == "q21" and p.get("sketch"):  # Qwen-Image 2.1 + Fun ControlNet (sketch)
         return "q21", graphs.qwen21_control(p["prompt"], _upload(p["sketch"]), p["w"], p["h"], p["seed"],
@@ -446,7 +447,11 @@ def run(job):
         return _traits(job)
     if not job.get("prompt_id"):
         family, wf = _graph(job)
-        if p.get("colour") and family != "score":  # colour mode: same graph without the greyscale finish
+        if p.get("pipe"):  # "Anima look": helper picture -> Anima redraw (-> Qwen-Edit colour)
+            pp = p["pipe"]
+            wf = graphs.pipeline(wf, pp, _upload(pp["ipref"]) if pp.get("ipref") else None)
+            family = "pipe"
+        elif p.get("colour") and family != "score":  # colour mode: same graph without the greyscale finish
             graphs.colourize(wf)
         if family != "score" and family != _family["v"]:
             if _family["v"] is not None:

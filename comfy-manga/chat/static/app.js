@@ -179,8 +179,17 @@ let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars",
   editModel: "klein", sketchModel: "anima", look: LS.get("manga-look", "bw") };  // Modify: klein or Qwen-Edit; sketch: Anima (manga look) or klein (exact layout)
 // defaults from the blind A/B round (user picks 2026-10-26): Small change klein, New picture Qwen-Edit, sketch Anima
 const EDIT_DEFAULT = { small: "klein", new: "qwen" };
+// One visible model, "Anima look" (helper + Anima redraw on the server). The direct models stay reachable only in
+// debug mode: open the app with #debug once (kept in this browser), #nodebug to leave it.
+let DEBUG = false;
+try {
+  if (location.hash === "#debug") localStorage.setItem("manga-debug", "1");
+  if (location.hash === "#nodebug") localStorage.removeItem("manga-debug");
+  DEBUG = localStorage.getItem("manga-debug") === "1";
+} catch (e) {}
 const EDIT_MODELS = { klein: "klein", qwen: "Qwen-Edit" };
 const MODEL_TAGS = { ...EDIT_MODELS, scribble: "Anima Scribble", q21: "Qwen 2.1 + ControlNet" };  // labels on chat messages
+if (DEBUG) { MODEL_TAGS.look = "Anima look (2-stage test)"; MODELS.look = "Anima look (2-stage test)"; }
 const log = $("#log"), text = $("#text");
 const PH = text.placeholder;
 
@@ -296,13 +305,22 @@ text.addEventListener("keydown", (e) => {
 });
 $("#composer").addEventListener("submit", (e) => { e.preventDefault(); send(); });
 
+// which model draws (2026-10-26, user): Modify = klein (Small change) / Qwen-Edit (New picture); colour looks =
+// Qwen-Edit; sketch = Anima ("Manga look") or klein ("Exact layout"); everything else B/W = Anima.
+// Debug (#debug) shows the Model chip, including the 2-stage "Anima look" test pipeline.
+function pickModel() {
+  if (state.sketch && state.sketch.mod) return state.editModel;
+  if (state.look !== "bw") return "qwen";
+  if (state.sketch) return state.sketchModel;
+  return DEBUG ? state.model : "anima";
+}
 async function send() {
   const t = text.value.trim();
   if ($("#sketchrow").classList.contains("busy")) { toast("The sketch is still uploading"); return; }
   if (!t && !state.sketch) { text.focus(); return; }
   if (!t && state.sketch.mod) { text.focus(); toast("Say what to change first"); return; }
   const key = uid();
-  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: state.sketch ? (state.sketch.mod ? state.editModel : state.sketchModel) : state.model,
+  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: pickModel(),
     edit: state.sketch && state.sketch.mod ? state.edit : null, style: state.look, state: "sending" });
   text.value = ""; LS.set("manga-draft", ""); autosize(); setSketch(null);
   renderChat(); log.scrollTop = log.scrollHeight;
@@ -382,12 +400,12 @@ function setSketch(sk) {
   $("#editmode").hidden = !mod; $("#editmodel").hidden = !mod;
   if (!EDIT_MODELS[state.editModel]) state.editModel = "klein";
   for (const b of $("#editmodel").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === state.editModel);
-  $("#sketchmodel").hidden = !sk || mod;
+  $("#sketchmodel").hidden = !sk || mod || state.look !== "bw";
   for (const b of $("#sketchmodel").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === state.sketchModel);
-  $("#modelbtn").hidden = !!sk;  // with a picture the model is picked in the row below
-  $("#modelnote").hidden = state.model === "klein" || !!sk;
+  $("#modelbtn").hidden = !!sk || !DEBUG;  // with a picture the model is picked in the row below
+  $("#modelnote").hidden = state.model === "klein" || !!sk || !DEBUG;
   for (const b of $("#editmode").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === state.edit);
-  $("#sketchtxt").textContent = !mod ? (state.sketchModel === "klein" ? "Follows your sketch's layout closely. Say what it shows (optional)."
+  $("#sketchtxt").textContent = !mod ? (state.look !== "bw" ? "Qwen-Edit draws it in colour after your sketch. Say what it shows (optional)." : state.sketchModel === "klein" ? "Follows your sketch's layout closely. Say what it shows (optional)."
       : "Manga drawing loosely after your sketch. Say what it shows (optional).")
     : nw ? "Same character, new pose, camera or scene." : "Changes only what you name. New pose or camera: New picture.";
   text.placeholder = !mod ? PH : nw ? "New picture: e.g. front view, in a rainy neon street at night"
@@ -418,7 +436,7 @@ $("#modelbtn").addEventListener("click", () => {  // tap: next model, for the ne
 $("#sketchx").addEventListener("click", () => setSketch(null));
 $("#lookbtn").addEventListener("click", () => {  // tap: next look (B/W, Colour, Cover, Chapter art)
   const ks = Object.keys(LOOKS);
-  state.look = ks[(ks.indexOf(state.look) + 1) % ks.length]; LS.set("manga-look", state.look); paintChips();
+  state.look = ks[(ks.indexOf(state.look) + 1) % ks.length]; LS.set("manga-look", state.look); paintChips(); setSketch(state.sketch);
   if (state.look === "cover" || state.look === "chapter") toast(state.look === "cover" ? "Cover: colour, tall, room for the title at the top" : "Chapter art: colour, wide, room for the chapter title");
 });
 $("#editmodel").addEventListener("click", (e) => {  // Modify: which edit model
@@ -466,7 +484,8 @@ function paintChips() {
   $("#lookbtn").textContent = LOOKS[state.look];
   $("#lookbtn").classList.toggle("on", state.look !== "bw");
   $("#modelbtn").classList.toggle("on", state.model !== "klein");
-  $("#modelnote").hidden = state.model === "klein" || !!state.sketch;
+  $("#modelnote").hidden = state.model === "klein" || !!state.sketch || !DEBUG;
+  $("#modelbtn").hidden = !DEBUG || !!state.sketch;
   $("#modelnote").textContent = `${MODELS[state.model]}: follows a sketch less closely; with a character the face may drift. Tap the model button to switch.`;
 }
 $("#shape").addEventListener("click", (e) => {

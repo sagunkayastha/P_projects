@@ -208,10 +208,17 @@ LOOKS = {"bw": "", "colour": "",
                     "one side for the chapter title, no text."}
 
 
+_PIPE = contextvars.ContextVar("pipe", default=None)
+
+
 def _add_image(params, owner):
-    """worker.add_job for chat pictures; colour looks add the colour flag (graphs.colourize at run time)."""
+    """worker.add_job for chat pictures; colour looks add the colour flag (graphs.colourize at run time);
+    the "Anima look" adds the two-stage pipeline (graphs.pipeline)."""
     if _STYLE.get() != "bw":
         params["colour"] = True
+    pipe = _PIPE.get()
+    if pipe:
+        params["pipe"] = {**pipe, "w": params["w"], "h": params["h"], "seed": params["seed"], "colour": _STYLE.get() != "bw"}
     return worker.add_job("image", params, owner)
 
 
@@ -288,11 +295,18 @@ def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", 
         text = f"{text.strip().rstrip('.') or 'the characters'}.{LOOKS[style]}"
         if not sketch:
             shape = "tall" if style == "cover" else "wide"
-    tok = _STYLE.set(style)
+    pipe = None
+    if model == "look":  # one visible model: a helper picks the layout, Anima draws (graphs.pipeline)
+        model = "qwen" if edit == "new" else "klein"
+        looks = "; ".join(f"{c['name']}: {c['traits']}" for c in chars if c.get("traits"))
+        pipe = {"prompt": (text.strip() or "the scene") + (f", {looks}" if looks else "") + ", detailed manga illustration",
+                "ipref": chars[0]["source_image"] if chars else None}
+    tok, ptok = _STYLE.set(style), _PIPE.set(pipe)
     try:
         return _chat_job1(text, shape, chars, owner, seed, sketch, model, edit)
     finally:
         _STYLE.reset(tok)
+        _PIPE.reset(ptok)
 
 
 def _chat_job1(text, shape, chars, owner, seed=None, sketch=None, model="klein", edit=None):
@@ -355,7 +369,7 @@ def send(cid: int, body: dict = Body(...)):
     shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
     chars = _ready_chars(body.get("chars"))
     model = body.get("model") if body.get("model") == "klein" or body.get("model") in graphs.UNETS else "klein"
-    if body.get("model") == "qwen" or (body.get("model") in ("scribble", "q21") and sketch):  # Qwen-Edit / Anima Scribble / Qwen 2.1 control: with a picture only
+    if body.get("model") in ("qwen", "look") or (body.get("model") in ("scribble", "q21") and sketch):  # Qwen-Edit / Anima Scribble / Qwen 2.1 control: with a picture only
         model = body.get("model")
     edit = body.get("edit") if sketch and body.get("edit") in EDIT else None
     if edit and not text:

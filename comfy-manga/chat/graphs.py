@@ -101,9 +101,9 @@ def anima_scribble(prompt, sketch, w, h, seed, model="anima", until=0.4):
     return _preview(workflows.bw_finish(wf, ["9", 0], w, h, "app"))
 
 
-def anima_guided(prompt, w, h, seed, control=None, ref=None, model="anima"):
+def anima_guided(prompt, w, h, seed, control=None, ref=None, model="anima", strength=1.0, end=0.6, ip=0.7):
     """Anima steered by a sketch (ControlNet-LLLite lineart control) and/or a character picture (IP-Adapter)."""
-    wf = workflows.anima_control(ANIMA_PREFIX + prompt, control, w, h, seed, "app", 1.0, 0.6, ref=ref,
+    wf = workflows.anima_control(ANIMA_PREFIX + prompt, control, w, h, seed, "app", strength, end, ref=ref, ip_strength=ip,
                                  neg_extra=ANIMA_NEG[len(workflows.NEG_BW) + 2:])
     wf["1"]["inputs"]["unet_name"] = UNETS[model]
     return _preview(wf)
@@ -189,3 +189,38 @@ def score(reference, candidates):
     """Face similarity of each candidate to the reference (custom node in comfyui/nodes/manga_score)."""
     return {"1": {"class_type": "MangaRefScore", "inputs": {"reference": reference,
                                                             "candidates": "\n".join(candidates)}}}
+
+
+# ---- "Anima look" two-stage pipeline (2026-10-26, user's choice: one visible model) ----
+# B/W: a helper (klein / Qwen-Edit: layout, edits, pose, references) draws first, Anima redraws it in its manga
+# style through LLLite (the helper picture as layout control, 1.0 for the first 60% of the steps; tuned on the r1
+# cases) + the IP-Adapter on the character's picture. Colour: then Qwen-Edit colours Anima's drawing.
+IN = "__IN__"
+COLOUR_EDIT = ("Colour Picture 1, a black-and-white manga drawing: keep every line, the faces, the poses, the "
+               "composition and the drawing style exactly; only add full colour with clean cel shading. ")
+
+
+def chain(a, b, prefix):
+    """Feed graph a's output picture into graph b (its LoadImage named IN); b's node ids get `prefix`."""
+    out = [k for k, n in a.items() if n["class_type"] in ("PreviewImage", "SaveImage")][0]
+    ref = a.pop(out)["inputs"]["images"]
+    loads = {k for k, n in b.items() if n["class_type"] == "LoadImage" and n["inputs"].get("image") == IN}
+    for k, n in b.items():
+        if k in loads:
+            continue
+        ins = {}
+        for name, v in n["inputs"].items():
+            if isinstance(v, list) and len(v) == 2 and isinstance(v[0], str) and v[0] in b:
+                v = ref if v[0] in loads else [prefix + v[0], v[1]]
+            ins[name] = v
+        a[prefix + k] = {**n, "inputs": ins}
+    return a
+
+
+def pipeline(helper, pipe, ipref=None):
+    """helper graph -> Anima redraw (B/W) -> optional Qwen-Edit colouring."""
+    w, h, seed = pipe["w"], pipe["h"], pipe["seed"]
+    wf = chain(helper, anima_guided(pipe["prompt"], w, h, seed, IN, ipref, "anima", 1.0, 0.6), "a")
+    if pipe.get("colour"):
+        wf = chain(wf, colourize(qwen_edit(COLOUR_EDIT + COLOUR_STYLE, [IN], w, h, seed)), "c")
+    return wf
