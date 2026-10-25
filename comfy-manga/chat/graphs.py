@@ -56,15 +56,52 @@ def anima_guided(prompt, w, h, seed, control=None, ref=None, model="anima"):
     return _preview(wf)
 
 
+# Qwen-Image-Edit 2511 (GGUF Q4_K_M, city96 loader) + Lightning 4-step LoRA; optional Multiple-Angles LoRA (fal)
+QWEN = {"unet": "qwen-image-edit-2511-Q4_K_M.gguf", "clip": "qwen_2.5_vl_7b_nvfp4.safetensors",
+        "vae": "qwen_image_vae.safetensors", "fast": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors",
+        "angles": "qwen-image-edit-2511-multiple-angles-lora.safetensors"}
+
+
+def qwen_edit(prompt, images, w, h, seed, angles=False):
+    """Qwen-Image-Edit 2511 with 1-3 pictures (Picture 1 = the one to edit), 4 steps, cfg 1, true greyscale."""
+    wf = {"1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": QWEN["unet"]}},
+          "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": QWEN["clip"], "type": "qwen_image", "device": "default"}},
+          "3": {"class_type": "VAELoader", "inputs": {"vae_name": QWEN["vae"]}}}
+    model = workflows.with_loras(wf, [(QWEN["fast"], 1.0)] + ([(QWEN["angles"], 1.0)] if angles else []))
+    wf["120"] = {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": model, "shift": 3.1}}
+    wf["121"] = {"class_type": "CFGNorm", "inputs": {"model": ["120", 0], "strength": 1.0}}
+    pics = {}
+    for i, img in enumerate(images[:3]):
+        n = 130 + i * 2
+        wf[str(n)] = {"class_type": "LoadImage", "inputs": {"image": img}}
+        wf[str(n + 1)] = {"class_type": "ImageScaleToTotalPixels", "inputs": {"image": [str(n), 0],
+                          "upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1}}
+        pics[f"image{i + 1}"] = [str(n + 1), 0]
+    wf["140"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"clip": ["2", 0], "prompt": prompt, "vae": ["3", 0], **pics}}
+    wf["141"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"clip": ["2", 0], "prompt": "", "vae": ["3", 0], **pics}}
+    wf["142"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["140", 0],
+                "reference_latents_method": "index_timestep_zero"}}
+    wf["143"] = {"class_type": "FluxKontextMultiReferenceLatentMethod", "inputs": {"conditioning": ["141", 0],
+                "reference_latents_method": "index_timestep_zero"}}
+    wf["144"] = {"class_type": "EmptySD3LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}}
+    wf["145"] = {"class_type": "KSampler", "inputs": {"model": ["121", 0], "positive": ["142", 0], "negative": ["143", 0],
+                "latent_image": ["144", 0], "seed": seed, "steps": 4, "cfg": 1.0, "sampler_name": "euler",
+                "scheduler": "simple", "denoise": 1.0}}
+    wf["146"] = {"class_type": "VAEDecode", "inputs": {"samples": ["145", 0], "vae": ["3", 0]}}
+    return _preview(workflows.bw_finish(wf, ["146", 0], w, h, "app", save_id="18"))
+
+
 def klein_edit(prompt, image, w, h, seed):
     """klein 9B edit of one reference picture (character sets)."""
     wf = workflows.klein9_edit(prompt, image, w, h, seed, "app")
     return _preview(workflows.bw_finish(wf, ["17", 0], w, h, "app", save_id="18"))
 
 
-def klein_refs(prompt, images, w, h, seed):
-    """klein 9B with several reference pictures (image 1, image 2, ...)."""
+def klein_refs(prompt, images, w, h, seed, loras=None):
+    """klein 9B with several reference pictures (image 1, image 2, ...); loras = [(file, strength), ...]."""
     wf = workflows.klein9_refs(prompt, images, w, h, seed, "app")
+    if loras:
+        wf["15"]["inputs"]["model"] = workflows.with_loras(wf, loras)
     return _preview(workflows.bw_finish(wf, ["17", 0], w, h, "app", save_id="18"))
 
 

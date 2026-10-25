@@ -117,11 +117,13 @@ def _graph(job):
                                                 _upload(p["sketch"]) if p.get("sketch") else None,
                                                 _upload(p["ipref"]) if p.get("ipref") else None, p["model"])
         return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"], p["model"])
+    if kind == "image" and p.get("model") == "qwen":  # Modify with Qwen-Image-Edit
+        return "qwen", graphs.qwen_edit(p["prompt"], _ref_names(p["refs"]), p["w"], p["h"], p["seed"], p.get("angles", False))
     if kind == "image" and p.get("model") == "klein" and not p.get("refs"):
         return "klein", graphs.klein_t2i(p["prompt"], p["w"], p["h"], p["seed"])
     if kind in ("image", "panel"):
         if p.get("refs"):
-            return "klein", graphs.klein_refs(p["prompt"], _ref_names(p["refs"]), p["w"], p["h"], p["seed"])
+            return "klein", graphs.klein_refs(p["prompt"], _ref_names(p["refs"]), p["w"], p["h"], p["seed"], p.get("loras"))
         return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"])
     if kind == "scene":
         return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"])

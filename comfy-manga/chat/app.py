@@ -222,8 +222,8 @@ EDIT = {"small": "Edit image 1, a finished picture. Change: {what}. Keep everyth
                "them: {what}. New pose and new camera; do not copy the pose or framing of image 1."}
 
 
-def _edit_job(text, src, edit, chars, owner, seed=None):
-    """Modify: klein with the picture as image 1 (and character sheets after it)."""
+def _edit_job(text, src, edit, chars, owner, seed=None, model="klein"):
+    """Modify: klein or Qwen-Image-Edit with the picture as image 1 (and character sheets after it)."""
     row = db.get("images", src)
     w, h = graphs.fit_size(min(2.0, max(0.5, row["w"] / row["h"])), 1.0)
     refs, cast = _cast(chars, text) if chars else ([], [])
@@ -232,6 +232,9 @@ def _edit_job(text, src, edit, chars, owner, seed=None):
               "No text, no letters, no speech bubbles.").replace("  ", " ")
     params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "refs": [src] + refs,
               "sketch": src, "edit": edit}
+    if model == "qwen":  # Qwen names its inputs "Picture 1, 2, 3" and takes at most 3
+        params.update(model="qwen", prompt=prompt.replace("image ", "Picture ").replace("Image ", "Picture "),
+                      refs=params["refs"][:3])
     if chars:
         params["chars"] = [c["slug"] for c in chars]
     return worker.add_job("image", params, owner)
@@ -260,7 +263,7 @@ def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", 
     if model in graphs.UNETS:  # Anima (beretMix) or Manga Vision
         return _anima_job(text, shape, chars, owner, seed, sketch, model)
     if sketch and edit in EDIT and text.strip():
-        return _edit_job(text, sketch, edit, chars, owner, seed)
+        return _edit_job(text, sketch, edit, chars, owner, seed, model)
     if sketch:
         return _sketch_job(text, sketch, chars, owner, seed)
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
@@ -300,6 +303,8 @@ def send(cid: int, body: dict = Body(...)):
     shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
     chars = _ready_chars(body.get("chars"))
     model = body.get("model") if body.get("model") == "klein" or body.get("model") in graphs.UNETS else "klein"
+    if body.get("model") == "qwen" and sketch and body.get("edit") in EDIT:  # Qwen-Image-Edit: Modify only
+        model = "qwen"
     edit = body.get("edit") if sketch and body.get("edit") in EDIT else None
     if edit and not text:
         raise HTTPException(400, "say what to change")

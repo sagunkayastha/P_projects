@@ -17,3 +17,8 @@ WORKDIR /app/ComfyUI
 RUN pip install --no-cache-dir --no-deps opencv-python-headless==4.14.0.94
 COPY --chmod=755 nodes/manga_score /app/ComfyUI/custom_nodes/manga_score
 ADD --chmod=644 https://raw.githubusercontent.com/nagadomi/lbpcascade_animeface/4433ab1ae1166ea75acfe99eb0f18709dac329a0/lbpcascade_animeface.xml /app/ComfyUI/custom_nodes/manga_score/lbpcascade_animeface.xml
+# 2026-10-26: Qwen-Image-Edit 2511 as GGUF Q4_K_M (fits 16 GB). city96 ComfyUI-GGUF (Apache-2.0), pinned commit,
+# code read before use (no network/subprocess); gguf reader lib pinned, no deps (numpy/pyyaml/tqdm already in the image).
+RUN pip install --no-cache-dir --no-deps gguf==0.17.1 && \
+    git clone -q https://github.com/city96/ComfyUI-GGUF custom_nodes/ComfyUI-GGUF && \
+    git -C custom_nodes/ComfyUI-GGUF checkout -q 6ea2651e7df66d7585f6ffee804b20e92fb38b8a

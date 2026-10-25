@@ -173,7 +173,9 @@ const pending = new Map();  // ckey -> {text, shape, chars, state, error}
 let msgs = [];
 const rendered = new Map();  // message id -> {sig, node}
 const MODELS = { klein: "klein", anima: "Anima", vision: "Manga Vision" };  // klein 9B (default); the others are Anima models
-let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein"), edit: "small" };
+let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein"), edit: "small",
+  editModel: LS.get("manga-editmodel", "klein") };  // Modify: klein or Qwen-Edit (the edit models)
+const EDIT_MODELS = { klein: "klein", qwen: "Qwen-Edit" };
 const log = $("#log"), text = $("#text");
 const PH = text.placeholder;
 
@@ -218,7 +220,7 @@ function chatImages() { return msgs.filter((m) => m.job && m.job.image_id).map((
 
 function renderMsg(m) {
   const j = m.job;
-  const tag = [m.edit === "new" ? "New picture" : m.edit === "small" ? "Small change" : "", (m.chars || []).length ? "with " + m.chars.join(", ") : "", MODELS[m.model] && m.model !== "klein" ? MODELS[m.model] : ""].filter(Boolean).join(" · ");
+  const tag = [m.edit === "new" ? "New picture" : m.edit === "small" ? "Small change" : "", (m.chars || []).length ? "with " + m.chars.join(", ") : "", (MODELS[m.model] || EDIT_MODELS[m.model]) && m.model !== "klein" ? MODELS[m.model] || EDIT_MODELS[m.model] : ""].filter(Boolean).join(" · ");
   const who = tag ? el("span", { class: "who", text: tag }) : null;
   const res = el("div", { class: "res" });
   if (j && j.image_id) {
@@ -295,7 +297,7 @@ async function send() {
   if (!t && !state.sketch) { text.focus(); return; }
   if (!t && state.sketch.mod) { text.focus(); toast("Say what to change first"); return; }
   const key = uid();
-  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: state.model,
+  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: state.sketch && state.sketch.mod ? state.editModel : state.model,
     edit: state.sketch && state.sketch.mod ? state.edit : null, state: "sending" });
   text.value = ""; LS.set("manga-draft", ""); autosize(); setSketch(null);
   renderChat(); log.scrollTop = log.scrollHeight;
@@ -345,16 +347,16 @@ function editMsg(m) {  // put this message back in the box to change it; sending
   text.value = m.text; LS.set("manga-draft", text.value); autosize();
   state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars); paintChips();
   if (m.shape) { state.shape = m.shape; LS.set("manga-shape", state.shape); paintChips(); }
-  if (m.edit) { state.edit = m.edit; }
+  if (m.edit) { state.edit = m.edit; if (EDIT_MODELS[m.model]) { state.editModel = m.model; LS.set("manga-editmodel", m.model); } }
   setSketch(m.sketch ? { id: m.sketch, mod: !!m.edit } : null);
-  if (m.model) { state.model = m.model; LS.set("manga-model", state.model); paintChips(); }
+  if (MODELS[m.model]) { state.model = m.model; LS.set("manga-model", state.model); paintChips(); }
   text.focus(); text.setSelectionRange(text.value.length, text.value.length);
   toast("Change the text, then ➤ to draw it again");
 }
 function modifyPic(m) {  // this picture as the source, empty box: say what to change (or what new picture), send (klein)
   text.value = ""; LS.set("manga-draft", ""); autosize();
   state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars);
-  state.model = "klein"; LS.set("manga-model", state.model); paintChips();
+  paintChips();
   state.edit = "small";
   setSketch({ id: m.job.image_id, mod: true });
   text.focus();
@@ -370,7 +372,10 @@ function setSketch(sk) {
   row.hidden = !sk; row.classList.remove("busy");
   if (sk) $("#sketchimg").src = sk.local || thumbUrl(sk.id);
   const mod = !!(sk && sk.mod), nw = mod && state.edit === "new";
-  $("#editmode").hidden = !mod;
+  $("#editmode").hidden = !mod; $("#editmodel").hidden = !mod;
+  if (!EDIT_MODELS[state.editModel]) state.editModel = "klein";
+  for (const b of $("#editmodel").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === state.editModel);
+  $("#modelbtn").hidden = mod;  // Modify picks its model in the row below
   for (const b of $("#editmode").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === state.edit);
   $("#sketchtxt").textContent = !mod ? "The picture follows your sketch's layout. Say what it shows (optional)."
     : nw ? "Same character, new pose, camera or scene." : "Changes only what you name. New pose or camera: New picture.";
@@ -400,6 +405,10 @@ $("#modelbtn").addEventListener("click", () => {  // tap: next model, for the ne
   state.model = ks[(ks.indexOf(state.model) + 1) % ks.length]; LS.set("manga-model", state.model); paintChips();
 });
 $("#sketchx").addEventListener("click", () => setSketch(null));
+$("#editmodel").addEventListener("click", (e) => {  // Modify: which edit model
+  const b = e.target.closest("button"); if (!b) return;
+  state.editModel = b.dataset.v; LS.set("manga-editmodel", state.editModel); setSketch(state.sketch); text.focus();
+});
 $("#editmode").addEventListener("click", (e) => {  // Modify: small change of this picture / new picture of the character
   const b = e.target.closest("button"); if (!b) return;
   state.edit = b.dataset.v; setSketch(state.sketch); text.focus();
@@ -434,7 +443,7 @@ function paintChips() {
   if (!MODELS[state.model]) state.model = "klein";
   $("#modelbtn").textContent = "Model: " + MODELS[state.model];
   $("#modelbtn").classList.toggle("on", state.model !== "klein");
-  $("#modelnote").hidden = state.model === "klein";
+  $("#modelnote").hidden = state.model === "klein" || !!(state.sketch && state.sketch.mod);
   $("#modelnote").textContent = `${MODELS[state.model]}: follows a sketch less closely; with a character the face may drift. Tap the model button to switch.`;
 }
 $("#shape").addEventListener("click", (e) => {

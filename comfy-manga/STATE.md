@@ -42,6 +42,11 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     (~/scratch/mangafix/modify/rerun.png): cyberpunk clothing OK, cyberpunk theme OK (background), long bob OK but
     hair turns light grey, front view fails in Small change but works in New picture (hint says so).
     New picture still copies the pose when the words name none (cafe test kept the sitting pose: new_cafe.png).
+  - 2026-10-26 Modify model switch (klein / Qwen-Edit) in the Modify row; Qwen-Image-Edit 2511 GGUF Q4_K_M +
+    Lightning 4-step (+ Multiple-Angles LoRA file, unused) + Qwen2.5-VL nvfp4 in models/; ComfyUI-GGUF in the
+    comfyui image (old image tag local/comfyui-manga:cu130-pre-qwen-20261026). Result: klein stays default
+    (~/scratch/mangafix/modify/MODELS-REPORT.md); Qwen 20-26 s vs klein 6-8 s. klein Character Consistency LoRA
+    downloaded (models/loras), no gain, not used.
 
 ## Next
 0. 2026-10-26: PC rebooting into Windows. To resume the tests: `docker compose up -d comfyui` then
