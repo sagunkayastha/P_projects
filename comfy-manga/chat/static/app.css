@@ -232,3 +232,11 @@ textarea:focus { border-color: #45505e; }
 #dcomposer .row { display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end; }
 #dcomposer .row textarea { flex: 1; }
 textarea.mono { font-family: ui-monospace, monospace; font-size: 13px; }
+
+/* scene pictures of a page */
+.scenes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.sc { display: flex; flex-direction: column; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 6px; }
+.sc .thumb { aspect-ratio: 16 / 9; background: #0d1014; border-radius: 6px; overflow: hidden; position: relative; }
+.sc .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.sc .thumb .bar { position: absolute; left: 0; right: 0; bottom: 0; }
+.sc .n { font-size: 12px; color: var(--dim); }

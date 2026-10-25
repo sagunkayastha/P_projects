@@ -23,6 +23,7 @@ import graphs
 import layout
 import media
 import refs
+import sheets
 import studio
 
 CANCEL: set[int] = set()
@@ -84,13 +85,27 @@ def _upload(iid):
     return comfy.upload(data, f"app_{hashlib.sha1(data).hexdigest()[:16]}.png")
 
 
+def _ref_names(specs):
+    """Reference specs -> ComfyUI input names: an image id or {"sheet": ids} (one character's upper-body sheet)."""
+    names = []
+    for r in specs:
+        if isinstance(r, dict) and r.get("sheet"):
+            data = sheets.sheet([media.read(i) for i in r["sheet"]])
+        else:
+            names.append(_upload(r))
+            continue
+        names.append(comfy.upload(data, f"app_{hashlib.sha1(data).hexdigest()[:16]}.png"))
+    return names
+
+
 def _graph(job):
     p = job["params"]
     kind = job["kind"]
     if kind in ("image", "panel"):
         if p.get("refs"):
-            names = [_upload(i) for i in p["refs"]]
-            return "klein", graphs.klein_refs(p["prompt"], names, p["w"], p["h"], p["seed"])
+            return "klein", graphs.klein_refs(p["prompt"], _ref_names(p["refs"]), p["w"], p["h"], p["seed"])
+        return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"])
+    if kind == "scene":
         return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"])
     if kind == "charref":
         if p.get("change"):  # the prompt is built now: the trait list may have been written since the job was queued
@@ -121,8 +136,8 @@ def _finish(job, entry):
     if not imgs:
         raise RuntimeError("ComfyUI finished but made no picture")
     data = comfy.view(imgs[-1])
-    source = {"image": "chat", "charref": "character", "panel": "panel"}[kind]
-    meta = {k: p.get(k) for k in ("seed", "w", "h", "label", "refs") if p.get(k) is not None}
+    source = {"image": "chat", "charref": "character", "panel": "panel", "scene": "scene"}[kind]
+    meta = {k: p.get(k) for k in ("seed", "w", "h", "label", "refs", "kind") if p.get(k) is not None}
     iid = media.save(data, source, p.get("prompt", ""), job["id"], meta)
     db.update("jobs", job["id"], status="done", image_id=iid, finished=time.time(), progress=1, total=1)
     _after(db.get("jobs", job["id"]))
@@ -224,7 +239,7 @@ def _finish_check(job, ui):
         return
     pn["warn"] = why.format(name=p.get("name", "the character")) + ": check it, ↻ Redo or ✎ Edit" if bad else None
     db.update("pages", pid, panels=panels)
-    _maybe_compose(pid)
+    _advance(pid)
 
 
 def _write_character_folder(ch):
@@ -268,6 +283,10 @@ def _after(job):
     elif owner.startswith("char:") and job["kind"] == "charscore" and job["status"] != "done":
         db.update("characters", int(owner.split(":")[1]), status="failed",
                   error=job.get("error") or "face check stopped")
+    elif owner.startswith("page:") and job["kind"] == "scene":
+        import pages
+        _, pid, _, kind = owner.split(":")
+        pages.scene_done(int(pid), kind, job)
     elif owner.startswith("page:") and job["kind"] == "panel":
         _, pid, idx = owner.split(":")
         page_panel_done(int(pid), int(idx), job)
@@ -277,7 +296,7 @@ def _after(job):
         if page and page["panels"][int(idx)].get("check_id") == job["id"]:
             page["panels"][int(idx)].pop("check_id", None)
             db.update("pages", int(pid), panels=page["panels"])
-            _maybe_compose(int(pid))
+            _advance(int(pid))
 
 
 def versions(panel):
@@ -308,19 +327,17 @@ def page_panel_done(pid, idx, job):
                                                              "ref": p["check_ref"], "name": p.get("check_name"),
                                                              "auto": p.get("auto", 0)}, f"page:{pid}:{idx}")
     db.update("pages", pid, panels=panels)
-    _maybe_compose(pid)
+    _advance(pid)
 
 
 def page_busy(page):
-    def busy(j):
-        return bool(j) and db.get("jobs", j)["status"] in ("queued", "running")
-    return any(busy(p.get("job_id")) or busy(p.get("check_id")) for p in page["panels"])
+    import pages
+    return pages.busy(page)
 
 
-def _maybe_compose(pid):
-    page = db.get("pages", pid)
-    if page and not page_busy(page):
-        compose_page(pid)
+def _advance(pid):
+    import pages
+    pages.advance(pid)
 
 
 def compose_page(pid):
@@ -471,8 +488,7 @@ def recover():
         else:
             add_job("charscore", {"char": ch["id"]}, owner)
     for page in db.query("SELECT * FROM pages WHERE status='working'"):
-        if not page_busy(page):
-            compose_page(page["id"])
+        _advance(page["id"])
 
 
 def start():

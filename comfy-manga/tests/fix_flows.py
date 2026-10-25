@@ -186,15 +186,15 @@ def flow_director(page):
     page.wait_for_selector("#modecard .mtext")
     shot(page, "d1-empty")
     check("mode card shows the LLM state", "LLM" in page.inner_text("#modecard"), page.inner_text("#modecard"))
-    page.locator("#dchars .chip", has_text="Nori").click()
-    page.locator("#dchars .chip", has_text="Bram").click()
+    page.get_by_role("button", name="Nori", exact=True).click()
+    page.get_by_role("button", name="Bram", exact=True).click()
     for i, t in enumerate(["Nori runs into the cafe out of the rain", 'Bram looks up from the counter. "You forgot your umbrella again."',
                            "she shakes the water off her scarf, embarrassed", 'close-up: Bram slides a hot cup to her. "On the house."']):
         page.fill(f"#d{i + 1}", t)
     page.fill("#dnotes", "cosy, late autumn evening, small wooden cafe")
     shot(page, "d2-first-message")
     page.click("#dsend")
-    page.wait_for_selector(".dans .shots", timeout=30000)
+    page.wait_for_selector(".dans .shots", timeout=180000)
     page.wait_for_timeout(800)
     shot(page, "d3-shotlist")
     check("shot list shown as 4 panels + bible", page.locator(".shots details.shot").count() == 4 and page.locator(".shots details.bible").count() == 1)
@@ -204,7 +204,7 @@ def flow_director(page):
     page.wait_for_timeout(900)
     page.fill("#dtext", "make panel 2 a low angle")
     page.click("#dsend")
-    page.wait_for_function("document.querySelectorAll('.dans .shots').length >= 2", timeout=30000)
+    page.wait_for_function("document.querySelectorAll('.dans .shots').length >= 2", timeout=180000)
     page.wait_for_timeout(800)
     msgs = api(f"/api/director/chats/{page.evaluate('LS.get(\"manga-dchat\")')}")["messages"]
     check("edit turn: my hand edit was sent back to the model", "I edited the shot list" in msgs[2]["content"] and "cold blue window" in msgs[2]["content"])

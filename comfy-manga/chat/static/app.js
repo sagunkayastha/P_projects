@@ -124,7 +124,7 @@ async function syncLoop() {
       const d = await r.json();
       setConn(d.comfy === "up" ? "up" : "wait");
       $("#banner").hidden = d.comfy === "up" && !(d.version !== version);
-      if (d.comfy !== "up") $("#banner").textContent = "Picture engine (ComfyUI) is starting — jobs wait and continue by themselves.";
+      if (d.comfy !== "up") $("#banner").textContent = "Picture engine (ComfyUI) is off or starting (LLM mode stops it) — jobs wait and continue by themselves.";
       if (d.version !== version) {
         $("#banner").replaceChildren("A new version of the app is ready.",
           el("button", { text: "Reload", onclick: () => location.reload() }));
@@ -708,11 +708,26 @@ function pageCard(p) {
   });
   return el("div", { class: "card", "data-page": p.id },
     el("h3", { text: `Page ${p.id}` + (names.length ? " · " + names.join(", ") : "") }),
-    el("div", { class: "sub" + (p.error ? " err" : ""), text: working ? (p.image_id ? "drawing the changed panel… the other panels stay" : "drawing the 4 panels…") : (p.error || `done · prompts by ${p.writer}`) }),
+    el("div", { class: "sub" + (p.error ? " err" : ""), text: working ? (p.image_id ? "drawing the changed panel… the other panels stay" : Object.values(p.scene || {}).some((v) => !v.image_id) ? "drawing the place first…" : "drawing the panels in order…") : (p.error || `done · prompts by ${p.writer}`) }),
     p.image_id ? el("img", { class: "pagepic", src: thumbUrl(p.image_id, "m"), alt: "page", onclick: () => openViewer([{ id: p.image_id, source: "page" }], 0) }) : null,
+    sceneRow(p),
     el("div", { class: "hint", text: "Fix one panel: ↻ Redo draws it again, ✎ Edit changes its line or who is in it. Tap a small picture to go back to an older try." }),
     el("div", { class: "panels" }, panels),
     p.image_id ? el("div", { class: "acts", style: "padding:10px 0 0" }, el("a", { class: "btn", href: imgUrl(p.image_id) + "&dl=1", download: "" }, "⬇ Download PNG")) : null);
+}
+function sceneRow(p) {  // the place plate + prop sheet every panel of this page is drawn with
+  const items = Object.entries(p.scene || {});
+  if (!items.length) return null;
+  const label = { plate: "Place", props: "Objects" };
+  return el("div", { class: "scene" }, el("div", { class: "label", text: "Scene pictures (every panel gets them, plus the panel before it)" }),
+    el("div", { class: "scenes" }, items.map(([k, v]) => {
+      const j = v.job, running = j && (j.status === "queued" || j.status === "running");
+      return el("div", { class: "sc", "data-kind": k },
+        el("div", { class: "thumb" }, v.image_id ? el("img", { src: thumbUrl(v.image_id), alt: label[k] || k, onclick: () => openViewer([{ id: v.image_id }], 0) }) : null,
+          running ? el("div", { class: "bar ind" }, el("i")) : null),
+        el("div", { class: "n", text: (label[k] || k) + (running ? " · drawing…" : v.error ? " · failed" : "") }),
+        el("button", { class: "btn", disabled: running || undefined, onclick: () => api("POST", `/api/pages/${p.id}/scene/${k}/redo`).then(() => { toast(`${label[k] || k}: drawing again. Redo panels to use the new one.`); refresh(); }).catch((e) => toast(e.message, { err: true })) }, "↻ Redo"));
+    })));
 }
 async function redo(pid, i, body) {
   try { await api("POST", `/api/pages/${pid}/panels/${i}/redo`, body); toast(`Panel ${i + 1}: drawing again, the other panels stay`); refresh(); }
@@ -899,8 +914,9 @@ function shotCard(m, latest) {
   const sl = m.shotlist;
   const save = () => { dEdited[m.id] = true; clearTimeout(save.t); save.t = setTimeout(() => api("POST", `/api/director/messages/${m.id}/shotlist`, { shotlist: sl }).catch((e) => toast(e.message, { err: true })), 600); };
   const field = (obj, k, label, rows) => {
-    const t = el("textarea", { rows: String(rows || 1), "data-k": k });
+    const t = el("textarea", { "data-k": k });
     t.value = Array.isArray(obj[k]) ? obj[k].join(", ") : (obj[k] || "");
+    t.rows = Math.max(rows || 1, Math.ceil(t.value.length / 34));  // ~34 characters a line at phone width
     t.addEventListener("input", () => { obj[k] = k === "characters" ? t.value.split(",").map((x) => x.trim()).filter(Boolean) : t.value; save(); });
     return el("label", { class: "fld" }, el("span", { text: label }), t);
   };

@@ -1,5 +1,5 @@
 # comfy-manga — STATE
-Updated: 2026-10-24 18:00 (MDT) · by rem-mangafix (Claude, PC laanta-chy)
+Updated: 2026-10-24 23:30 (MDT) · by rem-mangafix (Claude, PC laanta-chy)
 
 ## Goal
 Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU 0): chat -> pictures,
@@ -27,16 +27,15 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
 - Not tested on the real Samsung: no phone on USB/adb. (192.168.0.179:5555 = AT&T TV box, left alone.)
 
 ## Next
-1. Deploy (waiting on the user's go via Rem: recreating manga-app wipes the private RAM session):
-   `docker compose -f docker-compose.yml -f docker-compose.private.yml up -d --build app`. Code in commits
-   0dc2e42 (phase A, chat tools, cache, phase B behind MANGA_B=0) + c63f417 (Director tab, manga-gpu helper).
-2. When the GPU is allowed again: 8B director bench (tests/bench_director.py; 3060 container, CPU, vs qwen36),
-   phase B tests + numbers (tests/bench_consistency.py; B1 so far: Nori face-sim 0.929 -> 0.940, faces found
-   only 6/12 and 4/12; Bram: no face detected at all, whole-sim 0.850 -> 0.850), then MANGA_B=1.
-3. Phone test on the Samsung (ask Rem first). Private / Continue choice at start (user request, not built).
+1. Deploy everything together after the user's discussion of the continuity research (Rem):
+   `docker compose -f docker-compose.yml -f docker-compose.private.yml up -d --build app`; decide MANGA_B /
+   MANGA_CONT (both default on in code; MANGA_B=0 in docker-compose.yml today).
+2. Open points: close-ups come out medium; shoes drift with upper-body sheets (put shoes in Looks); Director model
+   choice (qwen36 switch mode recommended; 8B on the 3060 needs a router preset with device=CUDA1 = models.ini change).
+3. Phone test on the Samsung (ask Rem first). Private / Continue choice at start (not built).
 
 ## Blockers / waiting on
-- User's go for the deploy; GPU use paused by user order (2026-10-24 ~17:30) until Rem says the GPUs are free.
+- User's discussion of the research + go for the deploy.
 
 ## Decisions
 - 2026-10-24: one app at / (chat, gallery, characters, page). Old /studio and /demo routes removed from app.py

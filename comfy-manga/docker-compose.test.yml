@@ -15,10 +15,12 @@ services:
       - LLM_URL=http://host.docker.internal:11434
       - TZ=America/Denver
       - MANGA_B=${MANGA_B:-1}
+      - MANGA_CONT=${MANGA_CONT:-1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ${TEST_DATA:?set TEST_DATA}:/data/manga
+      - ${HOME}/.config/manga-gpu:/keys:ro
     networks: [manga]
     logging: {driver: local}
     restart: "no"

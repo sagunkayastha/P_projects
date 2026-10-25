@@ -23,6 +23,7 @@ import gpu as gpuhelper
 import graphs
 import layout
 import media
+import pages as pagejobs
 import refs as refpick
 import studio
 import worker
@@ -159,29 +160,20 @@ def _ready_chars(slugs):
     return out
 
 
-def _char_refs(ch, text, n):
-    """n pictures of a character for klein: the source + the saved views that fit this picture's camera
-    angle, outfit and expression (refs.py)."""
-    return refpick.pick(ch, text, n)
-
-
 def _cast(chars, text):
-    """(reference picture ids, cast dicts for writer.cast_text) for the characters in one picture."""
-    n = refpick.per_char(len(chars))
-    ids, cast = [], []
-    for ch in chars:
-        r = _char_refs(ch, text, n)
-        ids += r
-        cast.append({"name": ch["name"], "n": len(r), "traits": ch.get("traits") or ""})
-    return ids, cast
+    """(reference specs, cast dicts for writer.cast_text) for the characters in one picture."""
+    return pagejobs.char_refs(chars, text)
 
 
 def _chat_job(text, shape, chars, owner, seed=None):
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
     if chars:
         refs, cast = _cast(chars, text)
-        prompt = (f"{writer.cast_text(cast)} {text}. Keep each character's face, hair, body and outfit exactly as in "
-                  f"the reference pictures. {graphs.STYLE} No text, no letters, no speech bubbles.")
+        keep = "face, hair and clothes" if refpick.CONT else "face, hair, body and outfit"
+        pose = (" Draw a new pose that fits the text; do not copy the pose or framing of the reference pictures. "
+                + pagejobs.ONE) if refpick.CONT else ""
+        prompt = (f"{writer.cast_text(cast)} {text}. Keep each character's {keep} exactly as in the reference "
+                  f"pictures.{pose} {graphs.STYLE} No text, no letters, no speech bubbles.")
         params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "refs": refs,
                   "chars": [c["slug"] for c in chars]}
     else:
@@ -413,6 +405,7 @@ def retry_character(cid: int):
 # ---------- pages ----------
 def _page_view(pg):
     out = {k: pg.get(k) for k in ("id", "ts", "chars", "lines", "image_id", "status", "error", "writer", "bible")}
+    out["scene"] = {k: {**v, "job": _job_view(v.get("job_id"))} for k, v in (pg.get("scene") or {}).items()}
     out["panels"] = [{**p, "job": _job_view(p.get("job_id")), "versions": worker.versions(p)} for p in pg["panels"]]
     return out
 
@@ -430,18 +423,6 @@ def page(pid: int):
     return _page_view(pg)
 
 
-def _panel_job(pid, idx, panel, chars):
-    w, h = graphs.fit_size(layout.aspects()[idx], 1.0)
-    params = {"prompt": panel["prompt"], "w": w, "h": h, "seed": worker.seed(), "page": pid, "idx": idx,
-              "line": panel["line"], "quotes": panel.get("quotes", [])}
-    if "cast" in panel:
-        chars = [chars[i] for i in panel["cast"] if i < len(chars)]
-    if chars:
-        params["refs"], _ = _cast(chars, panel["line"] + " " + panel["prompt"])
-        params["check_ref"], params["check_name"] = chars[0]["source_image"], chars[0]["name"]
-    return worker.add_job("panel", params, f"page:{pid}:{idx}")
-
-
 @app.post("/api/pages")
 def make_page(body: dict = Body(...)):
     lines = [str(x).strip()[:1200] for x in (body.get("lines") or [])]
@@ -455,11 +436,10 @@ def make_page(body: dict = Body(...)):
         if fixed[i]:  # spelling fixed by the local LLM writer: used, and the user sees what it was
             panels[i]["fixed"] = lines[i]
             panels[i]["line"] = lines[i] = fixed[i]
+    seed = body.get("seed") if isinstance(body.get("seed"), int) else None  # tests: same seeds before/after
     pid = db.insert("pages", chars=[c["slug"] for c in chars], lines=lines, panels=panels, status="working",
-                    writer=who, bible=bible)
-    for i in range(4):
-        panels[i]["job_id"] = _panel_job(pid, i, panels[i], chars)
-    db.update("pages", pid, panels=panels)
+                    writer=who, bible=bible, seed=seed)
+    pagejobs.start(pid)
     return _page_view(db.get("pages", pid))
 
 
@@ -504,9 +484,25 @@ def redo_panel(pid: int, idx: int, body: dict = Body(default={})):
         lines = pg["lines"]
         lines[idx] = new_line
         db.update("pages", pid, lines=lines)
-    pn["job_id"] = _panel_job(pid, idx, pn, chars)
     pn["warn"] = None
     db.update("pages", pid, panels=panels, status="working", error=None)
+    pg = db.get("pages", pid)
+    pg["panels"][idx]["job_id"] = pagejobs.panel_job(pid, idx)
+    db.update("pages", pid, panels=pg["panels"])
+    return _page_view(db.get("pages", pid))
+
+
+@app.post("/api/pages/{pid}/scene/{kind}/redo")
+def redo_scene(pid: int, kind: str):
+    """Draw the place plate or the prop sheet again (new seed). Panels drawn after this use the new one."""
+    pg = db.get("pages", pid)
+    scene = (pg or {}).get("scene") or {}
+    if kind not in scene:
+        raise HTTPException(404, "no such scene picture")
+    if _busy(scene[kind].get("job_id")):
+        raise HTTPException(409, "this picture is still being made")
+    scene[kind]["job_id"] = pagejobs.scene_job(pid, kind, scene[kind]["prompt"])
+    db.update("pages", pid, scene=scene)
     return _page_view(db.get("pages", pid))
 
 
@@ -525,7 +521,7 @@ def pick_version(pid: int, idx: int, body: dict = Body(...)):
     lines = pg["lines"]
     lines[idx] = pn["line"]
     db.update("pages", pid, panels=panels, lines=lines)
-    if not worker.page_busy(db.get("pages", pid)):
+    if not pagejobs.busy(db.get("pages", pid)):
         worker.compose_page(pid)
     return _page_view(db.get("pages", pid))
 

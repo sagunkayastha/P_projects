@@ -9,10 +9,14 @@ import re
 
 # Phase B switch (angle-matched refs, trait list, best-of-2 + source floor, review before save). Off = old behaviour.
 ON = os.environ.get("MANGA_B", "1") != "0"
+# Continuity + pose switch (pages.py): scene pictures, previous panel, one upper-body sheet per character.
+CONT = os.environ.get("MANGA_CONT", "1") != "0"
 
 
 def per_char(n_chars):
     """Reference pictures per character in one picture (klein gets at most 4)."""
+    if CONT:
+        return 1  # one reference sheet per character (pages.char_refs)
     return 3 if ON and n_chars == 1 else 2
 
 # camera words in a panel line/prompt -> wanted view family (the view labels' angle part)

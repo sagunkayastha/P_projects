@@ -1,6 +1,26 @@
 # comfy-manga — STATE-LOG (newest first)
 
 
+
+## 2026-10-24 (night) — continuity + pose fix built and measured; director models benchmarked; deploy still waits ⚠️ (rem-mangafix)
+- New pages.py (MANGA_CONT, default on): no default shot per panel slot; scene bible -> place plate + prop sheet
+  (Anima) drawn first and given to every panel as 2 separate refs; without a bible, panels in order with the
+  previous panel as ref; one upper-body reference sheet per character (sheets.py); "new pose" + "one single
+  picture" wording. Page card shows the scene pictures with Redo.
+- Tried and dropped: plate+props stacked in one picture and the previous panel together with the plate (klein drew
+  split panels/grids, tests/exp_refs.py); a sheet with one small full-body tile (pose copying came back).
+- Continuity bench (3 stories, fixed seeds, old vs new2): split panels 2 -> 0, doubled people 3 -> 0 (VLM judge
+  qwen3-vl-8b; its same-place/same-prop answers were noisy); bike the same in all 4 panels (visual); face-sim same
+  (0.936/0.918 -> 0.935/0.908); page time ~65 s -> ~115 s. Close-ups still come out medium.
+- Pose bench (Nori): vague lines with old refs copy the source's standing pose 3/4; upper-body sheets 0/4 (but shoes
+  drift: traits text must carry them).
+- Phase B: character review flow 4/4; best-of-2 redrew 1/28 views (face 0.82 < 0.85 floor); kept-set whole min
+  0.851 -> 0.873. Trait lists (qwen36 vision) good for Nori; Bram got false "round spectacles".
+- Director models (3 stories x write + 2 edits): qwen36 on 5070 Ti 7-10 s/turn (first 31 s incl. load), best
+  quality; josiefied-qwen3-8b on 3060 13-15 s/turn, OK but flat shots; same on CPU 66-117 s/turn, no swap;
+  qwen3-vl-8b = thinking model, never finished a first shot list (6000-token cap). Full cycle (LLM up, write,
+  2 edits, LLM down, page): 194 s (first panel 54 s after switching back).
+
 ## 2026-10-24 (eve) — per-panel fix, chat tools, Director tab built; deploy waits on the user ⚠️ (rem-mangafix)
 - Phase A (commit 0dc2e42): per-panel Redo/Edit (line + cast), versions kept + pickable, page re-composed;
   no-character sheet; user shot words beat default framing; letterbox trim; panel face check (MangaRefScore)

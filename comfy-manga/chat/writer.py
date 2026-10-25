@@ -24,6 +24,8 @@ def cast_text(chars):
         k += n
         say = ", ".join(imgs[:-1]) + f" and {imgs[-1]}" if n > 1 else imgs[0]
         t = f"{c['name']} is the person shown in {say}"
+        if c.get("sheet"):
+            t += " (a reference sheet for the face, hair and clothes only)"
         if c.get("traits"):
             t += f" ({c['name']}: {c['traits'].strip().rstrip('.')})"
         parts.append(t)
@@ -31,11 +33,11 @@ def cast_text(chars):
 
 
 def template(scene, chars, framing, bible=""):
-    keep = ("Keep each character's face, hair, body and outfit exactly as in the reference pictures. "
-            if chars else "")
+    keep = (("Keep each character's face, hair and clothes exactly as in the reference pictures. " if refs.CONT else
+             "Keep each character's face, hair, body and outfit exactly as in the reference pictures. ") if chars else "")
     shot = f"{framing}. " if framing else ""
     n = refs.per_char(len(chars))
-    chars = [{**c, "n": c.get("n", n)} for c in chars]
+    chars = [{**c, "n": c.get("n", n), "sheet": c.get("sheet", refs.CONT)} for c in chars]
     scene = scene.strip().rstrip(".") + "."
     same = f"Same in every panel of this page: {bible.strip().rstrip('.')}. " if bible else ""
     return (f"Manga panel. {shot}{cast_text(chars)} Scene: {scene} {same}{keep}{graphs.STYLE} "
@@ -89,7 +91,10 @@ SHOT_WORDS = re.compile(r"\b(close[- ]?up|wide|establishing|medium|full[- ]body|
 
 
 def framing(scene, idx):
-    """The default shot for a panel, unless the line already says one ("close-up: ...")."""
+    """The default shot for a panel, unless the line already says one ("close-up: ..."). Continuity mode: none
+    at all; the shot comes from the story line, not from the panel's place on the page."""
+    if refs.CONT:
+        return None
     return None if SHOT_WORDS.search(scene) else FRAMING[idx % len(FRAMING)]
 
 
