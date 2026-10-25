@@ -72,8 +72,35 @@ def char_refs(chars, text):
 ONE = "One single picture filling the whole frame: not a comic page, no split screen, no grid, no inset panels."
 
 
-def _extras(place_slot, props_slot, prev_slot, has_chars):
-    parts = []
+# quality rounds 2026-10-24 (tests/bench_quality.py r1/r2, Codex + Gemini reviews, VLM judge): best = ink wording +
+# spelled-out shot sizes + "exactly once" (doubled person 6/24 -> 1/24 panels, tests/exp_double.py)
+INK = ("Bold confident G-pen ink lines with varied line weight, solid black fills, hatching and screentone dots for "
+       "shading, white paper, crisp high-contrast printed manga page look. Heavy outer contours, fine interior lines, "
+       "sparse screentone only in shadow planes, no soft airbrush gradients.")
+SHOTS = [(r"close[- ]?up", "Tight close-up: the face fills most of the frame, cropped from forehead to chin, shoulders "
+                           "mostly out of frame."),
+         (r"low[- ]angle|from below|looking up at", "Low-angle shot: the camera is near the ground tilted steeply up, "
+                                                     "strong upward perspective, the figure towers over the viewer."),
+         (r"medium shot", "Medium shot: framed from the waist up, legs out of frame."),
+         (r"\bwide[- ](?:establishing )?shot|establishing", "Wide shot: the whole place is visible and the character is "
+                                                             "small in the frame.")]
+
+
+def shot_text(text):
+    """Spell out the shot the line asks for (klein drew loose bust shots for 'close-up', eye level for 'low angle')."""
+    return " ".join(t for pat, t in SHOTS if re.search(pat, text, re.I))
+
+
+def once_text(names):
+    if not names:
+        return ""
+    who = " and ".join(names)
+    return (f"{who} {'appears' if len(names) == 1 else 'each appear'} exactly once in the picture: the reference "
+            f"{'sheet shows' if len(names) == 1 else 'sheets show'} the same person several times, draw {'that person' if len(names) == 1 else 'them'} only once.")
+
+
+def _extras(place_slot, props_slot, prev_slot, names, scene=""):
+    parts = [x for x in (shot_text(scene), once_text(names)) if x]
     if place_slot:
         parts.append(f"Image {place_slot} is only a reference for what the place looks like (same buildings, light and "
                      f"time of day); frame this panel as the scene says, do not copy its composition.")
@@ -82,9 +109,9 @@ def _extras(place_slot, props_slot, prev_slot, has_chars):
     if prev_slot:
         parts.append(f"Image {prev_slot} is the previous panel of this page: keep the same place, objects, light and "
                      f"time of day, but use a new camera angle and new poses; do not copy its composition.")
-    if has_chars:
+    if names:
         parts.append("Draw new poses that fit the action; do not copy the pose or framing of any reference picture.")
-    parts.append(ONE)
+    parts += [ONE, INK]
     return " ".join(parts)
 
 
@@ -120,7 +147,8 @@ def panel_job(pid, idx, seed=None, prm_extra=None):
         if prev and len(specs) < 4:
             specs.append(prev)
             slots["prev"] = len(specs)
-        extra = _extras(slots.get("plate"), slots.get("props"), slots.get("prev"), bool(chars))
+        extra = _extras(slots.get("plate"), slots.get("props"), slots.get("prev"), [c["name"] for c in chars],
+                        pn["line"] + " " + pn["prompt"])
         if extra:
             prompt = prompt.replace(graphs.STYLE, extra + " " + graphs.STYLE, 1)
     params["prompt"] = prompt

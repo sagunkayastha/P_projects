@@ -7,6 +7,7 @@ Variants: see VARIANTS below. Output: APP_DIR/../bench/quality/<round>/
 """
 import io
 import json
+import re
 import sys
 import time
 import uuid
@@ -94,6 +95,17 @@ def size(shape, mp):
     return graphs.fit_size(w / h, mp)
 
 
+INK = ("Bold confident G-pen ink lines with varied line weight, solid black fills, hatching and screentone dots for "
+       "shading, white paper, crisp high-contrast printed manga page look. ")
+INK2 = INK + ("Heavy outer contours, fine interior lines, sparse screentone only in shadow planes, no soft airbrush "
+              "gradients. ")
+SHOTS = [(r"close[- ]?up", "Tight close-up: the face fills most of the frame, cropped from forehead to chin, shoulders "
+                           "mostly out of frame."),
+         (r"low[- ]angle|from below|looking up at", "Low-angle shot: the camera is near the ground tilted steeply up, "
+                                                     "strong upward perspective, the figure towers over the viewer."),
+         (r"medium shot", "Medium shot: framed from the waist up, legs out of frame."),
+         (r"\bwide[- ](?:establishing )?shot|establishing", "Wide shot: the whole place is visible and the character is small in the frame.")]
+
 VARIANTS = {
     # name: dict of options
     "base": {},                                   # the deployed app: klein 9B, 4 steps, 1 MP, sheet refs, greyscale
@@ -109,7 +121,23 @@ VARIANTS = {
     "anima_pass35": {"anima": 0.35},               # klein picture, then an Anima img2img pass (manga linework)
     "anima_pass50": {"anima": 0.50},
     "once": {"once": True},                       # say each character appears exactly once (sheet shows 3 views)
+    # round 2 (both reviewers picked inkwords): build on it
+    "ink": {"extra": INK},
+    "ink_shots": {"extra": INK, "shots": True},
+    "ink_once": {"extra": INK, "once": True},
+    "ink_s8": {"extra": INK, "steps": 8},
+    "ink2": {"extra": INK2},
+    "ink2_all": {"extra": INK2, "shots": True, "once": True},
 }
+
+
+def shot_text(line):
+    """Spell out what a shot word means (klein drew loose bust shots for 'close-up', eye-level for 'low angle')."""
+    out = []
+    for pat, txt in SHOTS:
+        if re.search(pat, line, re.I):
+            out.append(txt)
+    return " ".join(out) + (" " if out else "")
 
 
 def once_text(chs):
@@ -156,15 +184,20 @@ def main():
         pics = []
         t0 = time.time()
         for k, (name, line, slugs, shape) in enumerate(SET):
+            f = out / f"{v}_{k + 1}_{name}.png"
             chs = chars_of(slugs)
             nm, per = ref_names(chs, line, o.get("refs", "sheet"))
             w, h = size(shape, o.get("mp", 1.0))
             pr = prompt_for(line, chs, per, o.get("refs", "sheet") == "sheet",
-                            (once_text(chs) if o.get("once") else "") + o.get("extra", ""))
-            data = run(klein(pr, nm, w, h, SEED + k, o.get("steps", 4), o.get("bw", True), o.get("unet"), o.get("clip")))
-            if o.get("anima"):
-                data = anima_pass(data, line, w, h, SEED + k, o["anima"])
-            (out / f"{v}_{k + 1}_{name}.png").write_bytes(data)
+                            (shot_text(line) if o.get("shots") else "") + (once_text(chs) if o.get("once") else "")
+                            + o.get("extra", ""))
+            if f.exists():  # resumed round: keep what is drawn (same seed)
+                data = f.read_bytes()
+            else:
+                data = run(klein(pr, nm, w, h, SEED + k, o.get("steps", 4), o.get("bw", True), o.get("unet"), o.get("clip")))
+                if o.get("anima"):
+                    data = anima_pass(data, line, w, h, SEED + k, o["anima"])
+                f.write_bytes(data)
             pics.append(data)
             prompts[f"{v}/{name}"] = pr
             print(v, name, flush=True)

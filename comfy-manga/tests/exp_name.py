@@ -1,4 +1,5 @@
-"""Does the character's NAME steer klein away from the reference? Same test character refs + seeds, only the name
+"""(Ran against pages._extras of commit 959727b; its signature changed after: check out that commit to rerun.)
+Does the character's NAME steer klein away from the reference? Same test character refs + seeds, only the name
 in the prompt changes (e.g. a name klein's text encoder knows from anime vs a neutral one).
 
   docker cp tests/exp_name.py manga-app-test:/app/ && docker exec manga-app-test python exp_name.py nori Nori,Rem

@@ -19,8 +19,12 @@ WHO = {"wide": ["the young woman with glasses"], "closeup": ["the young woman wi
 def main():
     base, d = sys.argv[1], Path(sys.argv[2])
     out = {}
-    for p in sorted(d.glob("*_[1-6]_*.png")):
-        v, k, name = re.match(r"(.+)_(\d)_(\w+)\.png", p.name).groups()
+    for p in sorted(d.glob("*.png")):
+        m = re.match(r"(.+)_(\d+)_([a-z]+)\.png$", p.name)
+        if not m or m.group(3) not in WHO:
+            continue
+        v, k, name = m.groups()
+        name_k = f"{k}_{name}"
         r = {"single": word(ask(base, [p], "Is this picture ONE single scene, or is it split into several panels, "
                                 "insets or a grid? Answer SINGLE or SPLIT first."), ["SINGLE", "SPLIT"]),
              "text": word(ask(base, [p], "Are there any written letters, words or speech bubbles in this picture? "
@@ -29,7 +33,7 @@ def main():
             a = ask(base, [p], f"How many times does {who} appear in this picture? Answer with a number first.")
             m = re.search(r"\d+", a)
             r["count"].append(int(m.group(0)) if m else -1)
-        out.setdefault(v, {})[name] = r
+        out.setdefault(v, {})[name_k] = r
         print(v, name, json.dumps(r), flush=True)
     summ = {v: {"doubled": sum(any(c >= 2 for c in r["count"]) for r in rs.values()),
                 "missing": sum(any(c == 0 for c in r["count"]) for r in rs.values()),
