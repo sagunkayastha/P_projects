@@ -25,7 +25,11 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     strip, read right to left, speech bubbles from "quoted" text. Redo one panel re-composes. ~75 s per page.
     Panel prompts: local LLM only if a model is already loaded in the llama.cpp router, else template.
 - Samsung tested 2026-10-25 (adb RZCR908FCPN on archbox): per-panel Edit/Redo works with ef7ee07.
-- LIVE since 2026-10-25 (private mode): 73b82b3 = quality rounds + "order" panel prompt (line + shot first, short)
+- LIVE since 2026-10-26 (private mode): efe3952 = simple model setup (Anima B/W + sketch, klein Small change,
+  Qwen-Edit New picture + Colour/Cover/Chapter art), Modify, Look chip. Image local/comfymanga:latest bc9250f8;
+  rollback tag local/comfymanga:pre-deploy-20261026 (= 73b82b3); ComfyUI image now has ComfyUI-GGUF (old:
+  local/comfyui-manga:cu130-pre-qwen-20261026). Smoke-tested live at 360 px: one picture per mode, all done.
+- Before: LIVE since 2026-10-25 (private mode): 73b82b3 = quality rounds + "order" panel prompt (line + shot first, short)
   + hands/object close-ups get detail-shot wording. Image sha256:4ca7c9da.
 - Built + committed, test image only, NOT deployed (2418b93..4f14ceb):
   - Chat sketch upload (✎ Sketch chip): klein keeps the sketch layout, character sheets as extra refs.
@@ -126,6 +130,9 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
 - Old work/out holds unclothed rejects from the studio era: never show or publish.
 
 ## Key paths & commands
+- Live start/stop (also what the archbox hub toggle must run): `docker compose --project-directory <MANGA_DIR>
+  -f <MANGA_DIR>/docker-compose.yml -f <MANGA_DIR>/docker-compose.private.yml up -d` (stop / restart: same files,
+  `stop` / `restart`). Without the private file the app mounts the on-disk store instead of RAM.
 - Rollback of the 2026-10-25 deploy: `docker tag local/comfymanga:pre-deploy-20261025b local/comfymanga:latest &&
   docker compose -f docker-compose.yml -f docker-compose.private.yml up -d --no-build --force-recreate app`.
 - Deploy (private mode only, user's yes first): `docker compose -f docker-compose.yml -f docker-compose.private.yml
