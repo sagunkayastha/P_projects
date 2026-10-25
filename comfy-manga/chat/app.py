@@ -324,7 +324,8 @@ def send(cid: int, body: dict = Body(...)):
         raise HTTPException(400, "say what to change")
     mid = db.insert("messages", chat_id=cid, text=text, shape=shape, chars=[ch["slug"] for ch in chars], ckey=ckey,
                     sketch=sketch, model=model, edit=edit)
-    jid = _chat_job(text, shape, chars, f"msg:{mid}", sketch=sketch, model=model, edit=edit)
+    seed = body.get("seed") if isinstance(body.get("seed"), int) and body["seed"] > 0 else None  # benches: fixed seed
+    jid = _chat_job(text, shape, chars, f"msg:{mid}", seed, sketch=sketch, model=model, edit=edit)
     db.update("messages", mid, job_id=jid)
     if not c["title"]:
         db.update("chats", cid, title=text[:60] or "sketch")
