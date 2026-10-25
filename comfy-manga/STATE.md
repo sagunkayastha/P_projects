@@ -57,6 +57,12 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     collection "picks"; key in r1/<round>/key.json: modify A=qwen B=klein, sketch A=qwen B=anima C=klein).
   - 2026-10-26 user picks -> defaults in the test build: sketch = Anima ("Manga look"; klein = "Exact layout"),
     Modify Small = klein, Modify New = Qwen-Edit (switch still there). Checked at 360 px.
+  - 2026-10-26 colour mode in the test build: chat 'Look' chip B/W (default) / Colour / Cover (tall, title room at
+    the top) / Chapter art (wide, title room at one side); messages.style; graphs.colourize drops the greyscale
+    finish + swaps the style words (pages stay B/W). Qwen-Edit also in the main Model chip (text + character refs).
+    Colour round c1 (6 cases x 2 seeds x klein/Qwen/Anima, ~/scratch/mangafix/ab/c1, key.json A=qwen B=klein
+    C=anima); blind page https://claude.ai/artifact/4fJpZWJ7DaMUw22yCggUX1. Anima (both manga fine-tunes) stays B/W
+    in colour mode, even with 'monochrome' in its negative.
 
 ## Next
 0. 2026-10-26: PC rebooting into Windows. To resume the tests: `docker compose up -d comfyui` then

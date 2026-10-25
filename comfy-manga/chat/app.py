@@ -4,6 +4,7 @@ FastAPI app; ComfyUI runs in its own container (COMFY_URL). Everything is stored
 (~/Documents/Personal/manga/app): SQLite (chats, jobs, images, characters, pages) + image files.
 """
 import asyncio
+import contextvars
 import hashlib
 import os
 import re
@@ -198,6 +199,22 @@ SKETCH = ("Image 1 is the user's rough sketch: keep its layout, camera, framing,
           "sketch lines, no construction lines, no pencil smudges, nothing stays rough.")
 
 
+_STYLE = contextvars.ContextVar("style", default="bw")
+# chat looks: B/W manga (default, pages always), colour, and two colour layouts with room for a title
+LOOKS = {"bw": "", "colour": "",
+         "cover": " Manga volume cover: the character large in the lower two-thirds, a clean empty area across the "
+                  "top third for the title, no text.",
+         "chapter": " Chapter title splash: a wide cinematic scene with the characters and the place, an empty area on "
+                    "one side for the chapter title, no text."}
+
+
+def _add_image(params, owner):
+    """worker.add_job for chat pictures; colour looks add the colour flag (graphs.colourize at run time)."""
+    if _STYLE.get() != "bw":
+        params["colour"] = True
+    return worker.add_job("image", params, owner)
+
+
 def _sketch_job(text, sketch, chars, owner, seed=None, model="klein"):
     """One finished picture from the user's sketch (klein, the sketch as image 1, keep its layout)."""
     row = db.get("images", sketch)
@@ -215,7 +232,7 @@ def _sketch_job(text, sketch, chars, owner, seed=None, model="klein"):
                       refs=params["refs"][:3])
     if chars:
         params["chars"] = [c["slug"] for c in chars]
-    return worker.add_job("image", params, owner)
+    return _add_image(params, owner)
 
 
 # Modify of a finished picture (image 1): a change to it, or a new picture of the same character(s)
@@ -240,7 +257,7 @@ def _edit_job(text, src, edit, chars, owner, seed=None, model="klein"):
                       refs=params["refs"][:3])
     if chars:
         params["chars"] = [c["slug"] for c in chars]
-    return worker.add_job("image", params, owner)
+    return _add_image(params, owner)
 
 
 def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima", scribble=False):
@@ -261,16 +278,30 @@ def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima",
     if chars:
         params["ipref"] = chars[0]["source_image"]
         params["chars"] = [c["slug"] for c in chars]
-    return worker.add_job("image", params, owner)
+    return _add_image(params, owner)
 
 
-def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", edit=None):
+def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", edit=None, style="bw"):
+    """Chat picture in the chosen look: B/W (default) or colour; cover / chapter add a layout with title room."""
+    style = style if style in LOOKS else "bw"
+    if style in ("cover", "chapter") and not edit:
+        text = f"{text.strip().rstrip('.') or 'the characters'}.{LOOKS[style]}"
+        if not sketch:
+            shape = "tall" if style == "cover" else "wide"
+    tok = _STYLE.set(style)
+    try:
+        return _chat_job1(text, shape, chars, owner, seed, sketch, model, edit)
+    finally:
+        _STYLE.reset(tok)
+
+
+def _chat_job1(text, shape, chars, owner, seed=None, sketch=None, model="klein", edit=None):
     if model in graphs.UNETS:  # Anima (beretMix) or Manga Vision
         return _anima_job(text, shape, chars, owner, seed, sketch, model)
     if model == "q21" and sketch:  # Qwen-Image 2.1 + Fun ControlNet Union on the sketch (test 2026-10-26: 0.6 / 50%)
         row = db.get("images", sketch)
         w, h = graphs.fit_size(min(2.0, max(0.5, row["w"] / row["h"])), 1.0)
-        return worker.add_job("image", {"prompt": f"{text.strip().rstrip('.') or 'the scene in the sketch'}. {graphs.STYLE}",
+        return _add_image({"prompt": f"{text.strip().rstrip('.') or 'the scene in the sketch'}. {graphs.STYLE}",
                                         "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "sketch": sketch,
                                         "model": "q21", "strength": 0.6, "end": 0.5,
                                         "neg": "colour, blurry, low quality, text, watermark"}, owner)
@@ -283,6 +314,11 @@ def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", 
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
     if chars:
         refs, cast = _cast(chars, text)
+        if model == "qwen":  # Qwen-Edit takes at most 3 pictures: one reference per character
+            one, k = [], 0
+            for c in cast:
+                one.append(refs[k]); k += c.get("n", 2); c["n"] = 1
+            refs = one[:3]
         keep = "face, hair and clothes" if refpick.CONT else "face, hair, body and outfit"
         pose = (" Draw a new pose that fits the text; do not copy the pose or framing of the reference pictures. "
                 + pagejobs.ONE) if refpick.CONT else ""
@@ -293,7 +329,9 @@ def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", 
     else:  # text only: klein draws it from words (before the model choice, Anima drew these)
         params = {"prompt": f"{text.strip().rstrip('.')}. {pagejobs.ONE} {graphs.STYLE} No text, no letters, no speech "
                             f"bubbles.", "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "model": "klein"}
-    return worker.add_job("image", params, owner)
+    if model == "qwen":  # Qwen-Image-Edit drawing from words (+ one picture per character)
+        params.update(model="qwen", prompt=params["prompt"].replace("image ", "Picture "), refs=params.get("refs", []))
+    return _add_image(params, owner)
 
 
 @app.post("/api/chats/{cid}/messages")
@@ -317,15 +355,16 @@ def send(cid: int, body: dict = Body(...)):
     shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
     chars = _ready_chars(body.get("chars"))
     model = body.get("model") if body.get("model") == "klein" or body.get("model") in graphs.UNETS else "klein"
-    if body.get("model") in ("qwen", "scribble", "q21") and sketch:  # Qwen-Edit / Anima Scribble / Qwen 2.1 control: with a picture only
+    if body.get("model") == "qwen" or (body.get("model") in ("scribble", "q21") and sketch):  # Qwen-Edit / Anima Scribble / Qwen 2.1 control: with a picture only
         model = body.get("model")
     edit = body.get("edit") if sketch and body.get("edit") in EDIT else None
     if edit and not text:
         raise HTTPException(400, "say what to change")
+    style = body.get("style") if body.get("style") in LOOKS else "bw"
     mid = db.insert("messages", chat_id=cid, text=text, shape=shape, chars=[ch["slug"] for ch in chars], ckey=ckey,
-                    sketch=sketch, model=model, edit=edit)
+                    sketch=sketch, model=model, edit=edit, style=style)
     seed = body.get("seed") if isinstance(body.get("seed"), int) and body["seed"] > 0 else None  # benches: fixed seed
-    jid = _chat_job(text, shape, chars, f"msg:{mid}", seed, sketch=sketch, model=model, edit=edit)
+    jid = _chat_job(text, shape, chars, f"msg:{mid}", seed, sketch=sketch, model=model, edit=edit, style=style)
     db.update("messages", mid, job_id=jid)
     if not c["title"]:
         db.update("chats", cid, title=text[:60] or "sketch")
@@ -344,9 +383,10 @@ def again(mid: int, body: dict = Body(default={})):
     sketch = m.get("sketch") if m.get("sketch") and db.get("images", m["sketch"]) else None
     model = m.get("model") or "klein"
     edit = m.get("edit") if sketch else None
+    style = m.get("style") or "bw"
     nid = db.insert("messages", chat_id=m["chat_id"], text=m["text"], shape=m["shape"], chars=m["chars"] or [],
-                    sketch=sketch, model=model, edit=edit)
-    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}", seed, sketch, model, edit)
+                    sketch=sketch, model=model, edit=edit, style=style)
+    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}", seed, sketch, model, edit, style)
     db.update("messages", nid, job_id=jid)
     return _msg_view(db.get("messages", nid))
 

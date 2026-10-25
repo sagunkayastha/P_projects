@@ -11,6 +11,34 @@ ANIMA_PREFIX = "monochrome, greyscale, manga, ink lineart, screentone, "
 # Anima drifts to glamour shots on plain prompts (a "lighthouse" test came back as a bikini figure)
 ANIMA_NEG = workflows.NEG_BW + ", swimsuit, bikini, lingerie, underwear, cleavage, text, speech bubble, watermark"
 
+# Colour mode (covers, chapter art; 2026-10-26): same graphs, no greyscale finish, colour wording
+COLOUR_STYLE = ("Full-colour anime manga illustration, like a manga volume cover: clean ink lineart, vibrant cel "
+                "shading, rich harmonious colours.")
+ANIMA_COLOUR_PREFIX = "anime coloring, manga cover illustration, vibrant colors, ink lineart, "
+_BW_NEG = ", color, colored, spot color, limited palette, orange, blue, red, yellow"
+
+
+def colourize(wf):
+    """Turn a B/W graph into a colour one in place: drop the greyscale nodes (bw_finish ids 40-51; the output
+    reads the image they started from) and swap the B/W wording for colour wording."""
+    if "40" in wf and wf["40"]["class_type"] == "ImageToMask":
+        src = wf["40"]["inputs"]["image"]
+        for k in range(40, 52):
+            wf.pop(str(k), None)
+        for node in wf.values():
+            if node["class_type"] in ("PreviewImage", "SaveImage") and node["inputs"].get("images") == ["51", 0]:
+                node["inputs"]["images"] = src
+    for node in wf.values():
+        for k, v in node["inputs"].items():
+            if isinstance(v, str):
+                v = (v.replace(STYLE, COLOUR_STYLE).replace(ANIMA_PREFIX, ANIMA_COLOUR_PREFIX)
+                     .replace(_BW_NEG, "").replace(", monochrome, greyscale", ""))
+                if k == "text" and v.startswith(workflows.NEG):  # Anima negative: push away from B/W
+                    v += ", monochrome, greyscale, black and white, lineart only, sketch"
+                node["inputs"][k] = v
+    return wf
+
+
 SHAPES = {"tall": (832, 1216), "square": (1024, 1024), "wide": (1344, 768)}
 
 

@@ -172,9 +172,11 @@ let chatId = LS.get("manga-chat", null);
 const pending = new Map();  // ckey -> {text, shape, chars, state, error}
 let msgs = [];
 const rendered = new Map();  // message id -> {sig, node}
-const MODELS = { klein: "klein", anima: "Anima", vision: "Manga Vision" };  // klein 9B (default); the others are Anima models
+const MODELS = { klein: "klein", anima: "Anima", vision: "Manga Vision", qwen: "Qwen-Edit" };
+// chat looks: B/W manga (pages are always B/W), colour, and colour layouts for a volume cover / chapter splash
+const LOOKS = { bw: "B/W", colour: "Colour", cover: "Cover", chapter: "Chapter art" };  // klein 9B (default); the others are Anima models
 let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein"), edit: "small",
-  editModel: "klein", sketchModel: "anima" };  // Modify: klein or Qwen-Edit; sketch: Anima (manga look) or klein (exact layout)
+  editModel: "klein", sketchModel: "anima", look: LS.get("manga-look", "bw") };  // Modify: klein or Qwen-Edit; sketch: Anima (manga look) or klein (exact layout)
 // defaults from the blind A/B round (user picks 2026-10-26): Small change klein, New picture Qwen-Edit, sketch Anima
 const EDIT_DEFAULT = { small: "klein", new: "qwen" };
 const EDIT_MODELS = { klein: "klein", qwen: "Qwen-Edit" };
@@ -223,7 +225,7 @@ function chatImages() { return msgs.filter((m) => m.job && m.job.image_id).map((
 
 function renderMsg(m) {
   const j = m.job;
-  const tag = [m.edit === "new" ? "New picture" : m.edit === "small" ? "Small change" : "", (m.chars || []).length ? "with " + m.chars.join(", ") : "", (MODELS[m.model] || MODEL_TAGS[m.model]) && m.model !== "klein" ? MODELS[m.model] || MODEL_TAGS[m.model] : ""].filter(Boolean).join(" · ");
+  const tag = [m.style && m.style !== "bw" ? LOOKS[m.style] : "", m.edit === "new" ? "New picture" : m.edit === "small" ? "Small change" : "", (m.chars || []).length ? "with " + m.chars.join(", ") : "", (MODELS[m.model] || MODEL_TAGS[m.model]) && m.model !== "klein" ? MODELS[m.model] || MODEL_TAGS[m.model] : ""].filter(Boolean).join(" · ");
   const who = tag ? el("span", { class: "who", text: tag }) : null;
   const res = el("div", { class: "res" });
   if (j && j.image_id) {
@@ -301,7 +303,7 @@ async function send() {
   if (!t && state.sketch.mod) { text.focus(); toast("Say what to change first"); return; }
   const key = uid();
   pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: state.sketch ? (state.sketch.mod ? state.editModel : state.sketchModel) : state.model,
-    edit: state.sketch && state.sketch.mod ? state.edit : null, state: "sending" });
+    edit: state.sketch && state.sketch.mod ? state.edit : null, style: state.look, state: "sending" });
   text.value = ""; LS.set("manga-draft", ""); autosize(); setSketch(null);
   renderChat(); log.scrollTop = log.scrollHeight;
   await sendPending(key);
@@ -313,7 +315,7 @@ async function sendPending(key) {
   try {
     await ensureChat();
     const m = await api("POST", `/api/chats/${chatId}/messages`, { text: p.text, shape: p.shape, chars: p.chars, ckey: key, model: p.model,
-      ...(p.sketch ? { sketch: p.sketch.id } : {}), ...(p.edit ? { edit: p.edit } : {}) });
+      ...(p.sketch ? { sketch: p.sketch.id } : {}), ...(p.edit ? { edit: p.edit } : {}), ...(p.style && p.style !== "bw" ? { style: p.style } : {}) });
     pending.delete(key);
     if (!msgs.find((x) => x.id === m.id)) msgs.push(m);
     renderChat(); log.scrollTop = log.scrollHeight;
@@ -351,6 +353,7 @@ function editMsg(m) {  // put this message back in the box to change it; sending
   state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars); paintChips();
   if (m.shape) { state.shape = m.shape; LS.set("manga-shape", state.shape); paintChips(); }
   if (m.edit) { state.edit = m.edit; if (EDIT_MODELS[m.model]) state.editModel = m.model; }
+  if (LOOKS[m.style || "bw"]) { state.look = m.style || "bw"; LS.set("manga-look", state.look); paintChips(); }
   else if (m.sketch && (m.model === "anima" || m.model === "klein")) state.sketchModel = m.model;
   setSketch(m.sketch ? { id: m.sketch, mod: !!m.edit } : null);
   if (MODELS[m.model]) { state.model = m.model; LS.set("manga-model", state.model); paintChips(); }
@@ -413,6 +416,11 @@ $("#modelbtn").addEventListener("click", () => {  // tap: next model, for the ne
   state.model = ks[(ks.indexOf(state.model) + 1) % ks.length]; LS.set("manga-model", state.model); paintChips();
 });
 $("#sketchx").addEventListener("click", () => setSketch(null));
+$("#lookbtn").addEventListener("click", () => {  // tap: next look (B/W, Colour, Cover, Chapter art)
+  const ks = Object.keys(LOOKS);
+  state.look = ks[(ks.indexOf(state.look) + 1) % ks.length]; LS.set("manga-look", state.look); paintChips();
+  if (state.look === "cover" || state.look === "chapter") toast(state.look === "cover" ? "Cover: colour, tall, room for the title at the top" : "Chapter art: colour, wide, room for the chapter title");
+});
 $("#editmodel").addEventListener("click", (e) => {  // Modify: which edit model
   const b = e.target.closest("button"); if (!b) return;
   state.editModel = b.dataset.v; setSketch(state.sketch); text.focus();
@@ -454,6 +462,9 @@ function paintChips() {
   c.classList.toggle("on", state.chars.length > 0);
   if (!MODELS[state.model]) state.model = "klein";
   $("#modelbtn").textContent = "Model: " + MODELS[state.model];
+  if (!LOOKS[state.look]) state.look = "bw";
+  $("#lookbtn").textContent = LOOKS[state.look];
+  $("#lookbtn").classList.toggle("on", state.look !== "bw");
   $("#modelbtn").classList.toggle("on", state.model !== "klein");
   $("#modelnote").hidden = state.model === "klein" || !!state.sketch;
   $("#modelnote").textContent = `${MODELS[state.model]}: follows a sketch less closely; with a character the face may drift. Tap the model button to switch.`;

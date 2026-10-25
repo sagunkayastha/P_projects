@@ -124,7 +124,7 @@ def _graph(job):
                                             p.get("strength", 1.0), p.get("steps", 30), p.get("cfg", 4.0), p.get("neg", ""),
                                             p.get("end", 1.0), p.get("invert", True))
     if kind == "image" and p.get("model") == "qwen":  # Modify with Qwen-Image-Edit
-        return "qwen", graphs.qwen_edit(p["prompt"], _ref_names(p["refs"]), p["w"], p["h"], p["seed"], p.get("angles", False))
+        return "qwen", graphs.qwen_edit(p["prompt"], _ref_names(p.get("refs") or []), p["w"], p["h"], p["seed"], p.get("angles", False))
     if kind == "image" and p.get("model") == "klein" and not p.get("refs"):
         return "klein", graphs.klein_t2i(p["prompt"], p["w"], p["h"], p["seed"])
     if kind in ("image", "panel"):
@@ -446,6 +446,8 @@ def run(job):
         return _traits(job)
     if not job.get("prompt_id"):
         family, wf = _graph(job)
+        if p.get("colour") and family != "score":  # colour mode: same graph without the greyscale finish
+            graphs.colourize(wf)
         if family != "score" and family != _family["v"]:
             if _family["v"] is not None:
                 comfy.free()
