@@ -24,6 +24,10 @@ KEYS = {"location": "location", "place": "location", "time and light": "time_lig
         "mood": "mood"}
 
 
+class PanelError(Exception):
+    """A panel cannot be drawn as asked (e.g. one of its characters is gone)."""
+
+
 def parse_bible(text):
     """'location: ...; time and light: ...; props: ...' (Director) or free text (= the place)."""
     out = {}
@@ -89,7 +93,10 @@ def panel_job(pid, idx, seed=None, prm_extra=None):
     page = db.get("pages", pid)
     pn = page["panels"][idx]
     chars = [db.one("SELECT * FROM characters WHERE slug=?", (s,)) for s in page["chars"]]
-    chars = [chars[i] for i in pn.get("cast", range(len(chars))) if i < len(chars) and chars[i]]
+    missing = [page["chars"][i] for i, c in enumerate(chars) if not c or c["status"] != "ready"]
+    if missing:  # never draw a panel without a character it should show
+        raise PanelError(f"character not ready or gone: {', '.join(missing)}")
+    chars = [chars[i] for i in pn.get("cast", range(len(chars))) if i < len(chars)]
     w, h = graphs.fit_size(layout.aspects()[idx], 1.0)
     params = {"w": w, "h": h, "seed": seed or worker.seed(), "page": pid, "idx": idx, "line": pn["line"],
               "quotes": pn.get("quotes", [])}
@@ -167,9 +174,12 @@ def advance(pid):
     todo = [i for i, p in enumerate(panels) if not p.get("job_id")]
     if todo:
         # in order with the previous panel as a reference; all at once when the scene pictures carry the place
-        for i in (todo if page.get("scene") else todo[:1]):
-            panels[i]["job_id"] = panel_job(pid, i, _seed(page, i))
-            db.update("pages", pid, panels=panels)
+        try:
+            for i in (todo if page.get("scene") else todo[:1]):
+                panels[i]["job_id"] = panel_job(pid, i, _seed(page, i))
+                db.update("pages", pid, panels=panels)
+        except PanelError as e:
+            db.update("pages", pid, status="failed", error=str(e))
         return
     if page["status"] == "working":
         worker.compose_page(pid)

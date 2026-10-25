@@ -16,6 +16,18 @@ def content_box(im):
     return box or (0, 0, im.width, im.height)
 
 
+def plain(im):
+    """True when the picture is a figure on a plain light background (its border is near-white and flat).
+    A source picture with a scene behind the character is not: cutting its 'upper part' can cut the
+    character out."""
+    g = im.convert("L").resize((128, max(1, round(128 * im.height / im.width))))
+    w, h = g.size
+    px = list(g.getdata())
+    border = px[:w] + px[-w:] + [px[y * w] for y in range(h)] + [px[y * w + w - 1] for y in range(h)]
+    mean = sum(border) / len(border)
+    return mean > 230 and sum(1 for v in border if v < 200) < 0.05 * len(border)
+
+
 def upper(im, frac=UPPER):
     x0, y0, x1, y1 = content_box(im)
     h = y1 - y0
@@ -26,11 +38,15 @@ def upper(im, frac=UPPER):
 
 
 def sheet(pngs, tile_h=640, gap=24, crop=True):
-    """PNG bytes of the pictures side by side (each cut to the upper body when crop) on white."""
+    """PNG bytes of the pictures side by side (each cut to the upper body when crop) on white. Pictures with a
+    scene background are left out when there are plain ones (the views of a saved character are plain)."""
+    ims = [Image.open(io.BytesIO(d)).convert("RGB") for d in pngs]
+    if crop:
+        flat = [im for im in ims if plain(im)]
+        ims = flat or ims
     tiles = []
-    for data in pngs:
-        im = Image.open(io.BytesIO(data)).convert("RGB")
-        if crop:
+    for im in ims:
+        if crop and plain(im):
             im = upper(im)
         k = tile_h / im.height
         tiles.append(im.resize((max(1, round(im.width * k)), tile_h), Image.LANCZOS))

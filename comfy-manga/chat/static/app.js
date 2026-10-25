@@ -61,6 +61,7 @@ function fitViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
   document.documentElement.style.setProperty("--vvh", vv.height + "px");
+  document.documentElement.style.setProperty("--vvtop", vv.offsetTop + "px");
   if (vv.offsetTop) window.scrollTo(0, 0);
 }
 if (window.visualViewport) {
@@ -530,7 +531,17 @@ function step(dir) {
 
 // ---------- sheet (bottom dialog) ----------
 function openSheet(body) { $("#sheet-body").replaceChildren(body); $("#sheet").hidden = false; openOv("sheet"); }
-$("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeOv("sheet"); });
+// Close on the dark backdrop only when the press started AND ended there: when the phone keyboard opens, the
+// page moves under the finger and a tap into a text box used to land on the backdrop (sheet closed, edit lost).
+let sheetDown = null;
+$("#sheet").addEventListener("pointerdown", (e) => { sheetDown = e.target.id === "sheet" ? Date.now() : null; });
+$("#sheet").addEventListener("click", (e) => {
+  if (e.target.id === "sheet" && sheetDown && Date.now() - sheetDown < 600 && !document.activeElement.matches("textarea, input")) closeOv("sheet");
+  sheetDown = null;
+});
+$("#sheet").addEventListener("focusin", (e) => {  // keep the box being typed in above the keyboard
+  if (e.target.matches("textarea, input")) setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 350);
+});
 
 function makeCharSheet(imageId) {
   const name = el("input", { type: "text", placeholder: "Name, e.g. Mia", maxlength: "40", enterkeyhint: "go" });
@@ -564,7 +575,8 @@ async function loadCharList() {
   return chars;
 }
 function charLine(c) {
-  if (c.status === "building") return `making pictures · ${c.made} / ${c.planned}`;
+  if (c.status === "building") return `making pictures · ${c.made} / ${c.planned}` +
+    (c.step ? ` · now: ${(c.step.label || "").replace("_", " ") || "view"} · ` + (c.step.total ? `step ${c.step.progress}/${c.step.total}` : "loading the model…") : c.ahead ? ` · waiting, ${c.ahead} other jobs first` : "");
   if (c.status === "checking") return "checking faces…";
   if (c.status === "ready") return `ready · ${c.refs.length} pictures`;
   if (c.status === "review") return "made · check the pictures, then Save";
@@ -578,7 +590,12 @@ async function loadChars() {
     list.replaceChildren(el("div", { class: "empty", text: "No characters yet. Open any picture (chat or gallery) and tap ★ Make character." }));
     return;
   }
-  list.replaceChildren(...chars.map((c) => {
+  renderKeyed(list, charNodes, chars, charCard, (c) => JSON.stringify([c.status, c.error, c.name, c.source_image, c.made, c.planned, c.refs.length]),
+    (node, c) => { const sub = node.querySelector(".sub"); if (sub) sub.textContent = charLine(c); });
+}
+const charNodes = new Map();
+function charCard(c) {
+  {
     const busyC = c.status === "building" || c.status === "checking";
     const pct = c.planned ? Math.round(100 * c.made / c.planned) : 0;
     return el("div", { class: "card" },
@@ -593,7 +610,7 @@ async function loadChars() {
         c.status === "review" ? el("button", { class: "btn star", onclick: () => go("char", c.id) }, "✓ Check & save") : null,
         busyC ? el("button", { class: "btn danger", onclick: () => api("POST", `/api/characters/${c.id}/cancel`).then(refresh) }, "■ Stop") : null,
         c.status === "failed" || c.status === "cancelled" ? el("button", { class: "btn", onclick: () => api("POST", `/api/characters/${c.id}/retry`).then(refresh).catch((e) => toast(e.message, { err: true })) }, "↻ Retry") : null));
-  }));
+  }
 }
 function useInChat(c) { state.chars = [c.slug]; LS.set("manga-chars", state.chars); paintChips(); go("chat"); }
 function pageWith(c) { pageSel = new Set([c.slug]); go("page"); }
@@ -605,6 +622,13 @@ async function loadChar(id) {
   const box = $("#chardetail");
   const ae = document.activeElement;
   if (ae && ae.tagName === "TEXTAREA" && box.contains(ae) && ae.dataset.cid === String(id)) return;  // typing: no repaint
+  const sig = JSON.stringify([c.id, c.status, c.error, c.refs, c.all, c.dropped, c.traits, c.made, c.planned]);
+  if (box.dataset.sig === sig && box.firstChild) {  // same content: only the progress line changes (taps stay on their buttons)
+    const sub = box.querySelector(".crow .sub");
+    if (sub) sub.textContent = charLine(c);
+    return;
+  }
+  box.dataset.sig = sig;
   if (c.status === "review") return box.replaceChildren(reviewCard(c));
   const refs = c.refs.map((i) => ({ id: i }));
   const dropped = (c.dropped || []).map((i) => ({ id: i }));
@@ -680,7 +704,46 @@ async function loadPages() {
     LS.set("manga-pagechars", [...pageSel]); loadPages();
   } }, c.name)) : [el("span", { class: "sub", text: "No characters yet: make one from any picture (★). Without one the page uses no reference." })]));
   const pages = await api("GET", "/api/pages");
-  $("#pagelist").replaceChildren(...pages.map(pageCard));
+  renderKeyed($("#pagelist"), pageNodes, pages, pageCard, pageSig, patchPage);
+}
+// Keyed lists: a card is rebuilt only when what it shows changes; progress text is patched in place.
+// (Rebuilding every card at each progress tick replaced buttons under the finger: taps on phones were lost.)
+const pageNodes = new Map();
+function renderKeyed(box, nodes, items, build, sig, patch) {
+  const ids = new Set(items.map((x) => x.id));
+  for (const [id, r] of nodes) if (!ids.has(id)) { r.node.remove(); nodes.delete(id); }
+  let prev = null;
+  for (const it of items) {
+    const g = sig(it);
+    let r = nodes.get(it.id);
+    if (!r || r.sig !== g) {
+      const node = build(it);
+      if (r) r.node.replaceWith(node);
+      r = { sig: g, node }; nodes.set(it.id, r);
+    } else patch(r.node, it);
+    if (prev ? prev.nextSibling !== r.node : box.firstChild !== r.node) { if (prev) prev.after(r.node); else box.prepend(r.node); }
+    prev = r.node;
+  }
+}
+const stripJob = (j) => j && { s: j.status, e: j.error, t: !!j.total };
+function pageSig(p) {
+  return JSON.stringify([p.status, p.error, p.image_id, p.chars, p.writer, p.bible,
+    p.panels.map((x) => [x.image_id, x.line, x.cast, x.warn, x.fixed, (x.versions || []).map((v) => v.image_id), stripJob(x.job)]),
+    Object.entries(p.scene || {}).map(([k, v]) => [k, v.image_id, v.error, stripJob(v.job)]), Object.keys(charBySlug).length]);
+}
+function patchPage(node, p) {
+  const st = node.querySelector(".pstatus");
+  if (st && p.status === "working") st.textContent = pageLine(p) + (p.image_id ? " · the other panels stay" : "");
+  p.panels.forEach((x, i) => {
+    const n = node.querySelector(`.panel[data-idx="${i}"] .n`), j = x.job;
+    if (n && j && (j.status === "queued" || j.status === "running")) n.textContent = jobLine(j);
+    const bar = node.querySelector(`.panel[data-idx="${i}"] .bar i`);
+    if (bar && j && j.total) bar.style.width = Math.round(100 * j.progress / j.total) + "%";
+  });
+  for (const [k, v] of Object.entries(p.scene || {})) {
+    const n = node.querySelector(`.sc[data-kind="${k}"] .n`), j = v.job;
+    if (n && j && (j.status === "queued" || j.status === "running")) n.textContent = ({ plate: "Place", props: "Objects" }[k] || k) + " · " + jobLine(j);
+  }
 }
 function pageCard(p) {
   const working = p.status === "working";
@@ -696,24 +759,43 @@ function pageCard(p) {
       el("div", { class: "thumb" }, x.image_id ? el("img", { src: thumbUrl(x.image_id), alt: `panel ${i + 1}`, onclick: () => openViewer(shown.map((q) => ({ id: q.image_id })), shown.findIndex((q) => q.image_id === x.image_id)) }) : null,
         running ? el("div", { class: "bar" + (j.status === "running" && j.total ? "" : " ind") }, el("i", { style: `width:${pct}%` })) : null,
         el("span", { class: "num", text: `${i + 1}` })),
-      el("div", { class: "n" + (j && j.status === "failed" ? " err" : ""), text: j && j.status === "failed" ? "failed: " + (j.error || "") : running ? (j.status === "queued" ? "waiting…" : "drawing…") : (who.length ? who.join(" + ") : "no character") }),
+      el("div", { class: "n" + (j && j.status === "failed" ? " err" : ""), text: j && j.status === "failed" ? "failed: " + (j.error || "") : running ? jobLine(j) : (who.length ? who.join(" + ") : "no character") }),
       el("div", { class: "line", text: x.line }),
       x.fixed ? el("div", { class: "fixed", text: "spelling fixed (you wrote: " + x.fixed + ")" }) : null,
       x.warn ? el("div", { class: "warn", text: "⚠ " + x.warn }) : null,
       vs.length > 1 ? el("div", { class: "vers" }, vs.map((v, k) => el("button", { class: v.image_id === x.image_id ? "on" : "", "aria-label": `version ${k + 1}`, title: v.line, disabled: running || undefined, onclick: () => pickVersion(p.id, i, v.image_id) },
         el("img", { src: thumbUrl(v.image_id), alt: "" })))) : null,
       el("div", { class: "pbtns" },
-        el("button", { class: "btn", disabled: running || undefined, onclick: () => redo(p.id, i) }, "↻ Redo"),
-        el("button", { class: "btn", disabled: running || undefined, onclick: () => editPanel(p, i) }, "✎ Edit")));
+        el("button", { class: "btn", disabled: running || (working && !j) || undefined, onclick: () => redo(p.id, i) }, "↻ Redo"),
+        el("button", { class: "btn", disabled: running || (working && !j) || undefined, onclick: () => editPanel(p, i) }, "✎ Edit")));
   });
   return el("div", { class: "card", "data-page": p.id },
     el("h3", { text: `Page ${p.id}` + (names.length ? " · " + names.join(", ") : "") }),
-    el("div", { class: "sub" + (p.error ? " err" : ""), text: working ? (p.image_id ? "drawing the changed panel… the other panels stay" : Object.values(p.scene || {}).some((v) => !v.image_id) ? "drawing the place first…" : "drawing the panels in order…") : (p.error || `done · prompts by ${p.writer}`) }),
+    el("div", { class: "sub pstatus" + (p.error ? " err" : ""), text: working ? pageLine(p) + (p.image_id ? " · the other panels stay" : "") : (p.error || `done · prompts by ${p.writer}`) }),
     p.image_id ? el("img", { class: "pagepic", src: thumbUrl(p.image_id, "m"), alt: "page", onclick: () => openViewer([{ id: p.image_id, source: "page" }], 0) }) : null,
     sceneRow(p),
     el("div", { class: "hint", text: "Fix one panel: ↻ Redo draws it again, ✎ Edit changes its line or who is in it. Tap a small picture to go back to an older try." }),
     el("div", { class: "panels" }, panels),
     p.image_id ? el("div", { class: "acts", style: "padding:10px 0 0" }, el("a", { class: "btn", href: imgUrl(p.image_id) + "&dl=1", download: "" }, "⬇ Download PNG")) : null);
+}
+function jobLine(j) {  // "waiting · 3 ahead" / "loading the model…" / "step 2/4"
+  if (!j) return "";
+  if (j.status === "queued") return j.ahead ? `waiting · ${j.ahead} ahead` : "next";
+  if (j.status === "running") return j.total ? `step ${j.progress}/${j.total}` : "loading the model…";
+  return j.status;
+}
+function pageLine(p) {  // what this page is doing right now
+  const items = [...Object.entries(p.scene || {}).map(([k, v]) => [{ plate: "place picture", props: "objects picture" }[k] || k, v.job]),
+    ...p.panels.map((x, i) => [`panel ${i + 1}`, x.job])];
+  const run = items.find(([, j]) => j && j.status === "running");
+  const wait = items.filter(([, j]) => j && j.status === "queued");
+  const parts = [];
+  if (run) parts.push(`drawing ${run[0]} · ${jobLine(run[1])}`);
+  if (wait.length) parts.push(`${wait.length} waiting` + (!run && wait[0][1].ahead ? ` (${wait[0][1].ahead} other jobs first)` : ""));
+  const todo = p.panels.filter((x) => !x.job).length;
+  const scenePending = Object.values(p.scene || {}).some((v) => !v.image_id && v.job && (v.job.status === "queued" || v.job.status === "running"));
+  if (todo) parts.push(scenePending ? `${todo} panels start after the scene pictures` : `${todo} panel(s) start after the one before`);
+  return parts.join(" · ") || "putting the page together…";
 }
 function sceneRow(p) {  // the place plate + prop sheet every panel of this page is drawn with
   const items = Object.entries(p.scene || {});
@@ -725,7 +807,7 @@ function sceneRow(p) {  // the place plate + prop sheet every panel of this page
       return el("div", { class: "sc", "data-kind": k },
         el("div", { class: "thumb" }, v.image_id ? el("img", { src: thumbUrl(v.image_id), alt: label[k] || k, onclick: () => openViewer([{ id: v.image_id }], 0) }) : null,
           running ? el("div", { class: "bar ind" }, el("i")) : null),
-        el("div", { class: "n", text: (label[k] || k) + (running ? " · drawing…" : v.error ? " · failed" : "") }),
+        el("div", { class: "n", text: (label[k] || k) + (running ? " · " + jobLine(j) : v.error ? " · failed" : "") }),
         el("button", { class: "btn", disabled: running || undefined, onclick: () => api("POST", `/api/pages/${p.id}/scene/${k}/redo`).then(() => { toast(`${label[k] || k}: drawing again. Redo panels to use the new one.`); refresh(); }).catch((e) => toast(e.message, { err: true })) }, "↻ Redo"));
     })));
 }
@@ -824,6 +906,18 @@ $("#pageform").addEventListener("submit", async (e) => {
     $("#pagelist").scrollIntoView({ behavior: "smooth" });
   } catch (err) { toast(err.message, { err: true }); }
   finally { b.disabled = false; b.textContent = "Make page"; }
+});
+
+$("#queue").addEventListener("click", async () => {
+  const L = await api("GET", "/api/queue").catch(() => []);
+  openSheet(el("div", {}, el("h2", { text: `Queue · ${L.length}` }),
+    el("div", { class: "sub", text: "The GPU does one job at a time, top first." }),
+    el("div", { class: "qlist" }, L.map((j, k) => el("div", { class: "qrow" + (j.status === "running" ? " on" : "") },
+      el("span", { class: "qn", text: j.status === "running" ? "▶" : String(k + 1) }),
+      el("span", { class: "qw", text: j.what }),
+      el("span", { class: "qs", text: j.status === "running" ? (j.total ? `step ${j.progress}/${j.total}` : "loading…") : "waiting" }),
+      el("button", { class: "btn small danger", onclick: async () => { await api("POST", `/api/jobs/${j.id}/cancel`).catch((e) => toast(e.message, { err: true })); closeOv("sheet"); refresh(); } }, "■")))),
+    el("div", { class: "two" }, el("button", { class: "ghost", type: "button", onclick: () => closeOv("sheet") }, "Close"))));
 });
 
 // ---------- director: chat with the local LLM -> shot list -> Make page ----------

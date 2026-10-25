@@ -124,6 +124,32 @@ def cancel_job(jid: int):
     return {"ok": True}
 
 
+# ---------- queue (what the GPU is doing and what waits) ----------
+def _what(j):
+    p, kind, owner = j["params"] or {}, j["kind"], j["owner"] or ""
+    if kind == "image":
+        return "Chat picture: " + (p.get("text") or "")[:50]
+    if kind == "panel":
+        return f"Page {p.get('page')} · panel {(p.get('idx') or 0) + 1}" + (" (auto redo)" if p.get("auto") else "")
+    if kind == "panelcheck":
+        return f"Page {p.get('page')} · panel {(p.get('idx') or 0) + 1} · face check"
+    if kind == "scene":
+        return f"Page {p.get('page')} · " + {"plate": "place picture", "props": "objects picture"}.get(p.get("kind"), "scene")
+    if kind in ("charref", "charscore", "traits"):
+        ch = db.get("characters", int(owner.split(":")[1])) if owner.startswith("char:") else None
+        name = ch["name"] if ch else "character"
+        return {"charref": f"{name} · view {(p.get('label') or '').replace('_', ' ')}" + (" (2nd try)" if p.get("retry") else ""),
+                "charscore": f"{name} · face check", "traits": f"{name} · looks in words"}[kind]
+    return kind
+
+
+@app.get("/api/queue")
+def queue():
+    rows = db.query("SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY status='running' DESC, id LIMIT 200")
+    return [{"id": j["id"], "status": j["status"], "progress": j["progress"], "total": j["total"], "what": _what(j),
+             "started": j["started"]} for j in rows]
+
+
 # ---------- chats ----------
 @app.get("/api/chats")
 def chats():
@@ -274,8 +300,12 @@ def _char_view(ch, full=False):
     out["made"] = counts.get("done", 0)
     out["planned"] = sum(counts.values())
     out["refs"] = ch["refs"] or []
-    run = db.one("SELECT id, progress, total FROM jobs WHERE owner=? AND status='running'", (owner,))
-    out["step"] = run if run else None
+    run = db.one("SELECT id, progress, total, params FROM jobs WHERE owner=? AND status='running'", (owner,))
+    out["step"] = {"progress": run["progress"], "total": run["total"],
+                   "label": (run["params"] or {}).get("label", "") if run["params"] else ""} if run else None
+    first = db.one("SELECT id FROM jobs WHERE owner=? AND status='queued' ORDER BY id LIMIT 1", (owner,))
+    out["ahead"] = (db.one("SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','running') AND id<? AND owner<>?",
+                           (first["id"], owner))["n"] if first and not run else 0)
     if full:
         out["scores"] = ch["scores"] or {}
         made = db.query("SELECT image_id FROM jobs WHERE owner=? AND kind='charref' AND status='done' ORDER BY id",
@@ -487,7 +517,11 @@ def redo_panel(pid: int, idx: int, body: dict = Body(default={})):
     pn["warn"] = None
     db.update("pages", pid, panels=panels, status="working", error=None)
     pg = db.get("pages", pid)
-    pg["panels"][idx]["job_id"] = pagejobs.panel_job(pid, idx)
+    try:
+        pg["panels"][idx]["job_id"] = pagejobs.panel_job(pid, idx)
+    except pagejobs.PanelError as e:
+        db.update("pages", pid, status="done", error=str(e))
+        raise HTTPException(409, str(e))
     db.update("pages", pid, panels=pg["panels"])
     return _page_view(db.get("pages", pid))
 
