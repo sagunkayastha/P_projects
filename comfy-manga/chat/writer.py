@@ -32,7 +32,11 @@ def cast_text(chars):
     return "; ".join(parts) + "." if parts else ""
 
 
-SHOTS = [(r"close[- ]?up", "Tight close-up: the face fills most of the frame, cropped from forehead to chin, shoulders "
+# "close-up of Bram's hands" is a detail shot, not a face close-up (round p2, Codex review)
+DETAIL = re.compile(r"close[- ]?up (?:of|on) (?:(?:\w+'s|his|her|their|the|an?) )?(?:\w+ )?(hands?|feet|fingers|eyes|"
+                    r"[a-z]+ (?:watch|book|ticket|letter|cup|key|phone))\b", re.I)
+SHOTS = [(r"close[- ]?up(?! (?:of|on) (?:(?:\w+'s|his|her|their|the|an?) )?(?:\w+ )?(?:hands?|feet|fingers|eyes|[a-z]+ "
+          r"(?:watch|book|ticket|letter|cup|key|phone))\b)", "Tight close-up: the face fills most of the frame, cropped from forehead to chin, shoulders "
                            "mostly out of frame."),
          (r"low[- ]angle|from below|looking up at", "Low-angle shot: the camera is near the ground tilted steeply up, "
                                                      "strong upward perspective, the figure towers over the viewer."),
@@ -43,7 +47,10 @@ SHOTS = [(r"close[- ]?up", "Tight close-up: the face fills most of the frame, cr
 
 def shot_text(text):
     """Spell out the shot the line asks for (klein drew loose bust shots for 'close-up', eye level for 'low angle')."""
-    return " ".join(t for pat, t in SHOTS if re.search(pat, text, re.I))
+    m = DETAIL.search(text)
+    detail = (f"Extreme close-up of the {m.group(1).lower()}: they fill most of the frame; the face is out of frame "
+              f"or cut off at the edge." if m else "")
+    return " ".join([detail] * bool(detail) + [t for pat, t in SHOTS if re.search(pat, text, re.I)])
 
 
 def template(scene, chars, framing, bible=""):
