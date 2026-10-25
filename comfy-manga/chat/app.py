@@ -113,6 +113,8 @@ def _job_view(jid):
     if j["image_id"]:
         img = db.get("images", j["image_id"])
         out["w"], out["h"] = img["w"], img["h"]
+    if j["params"].get("used"):
+        out["used"] = j["params"]["used"]
     return out
 
 

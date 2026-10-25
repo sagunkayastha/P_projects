@@ -108,7 +108,14 @@ VARIANTS = {
                           "screentone dots for shading, white paper, crisp high-contrast printed manga page look. "},
     "anima_pass35": {"anima": 0.35},               # klein picture, then an Anima img2img pass (manga linework)
     "anima_pass50": {"anima": 0.50},
+    "once": {"once": True},                       # say each character appears exactly once (sheet shows 3 views)
 }
+
+
+def once_text(chs):
+    names = " and ".join(c["name"] for c in chs)
+    return (f"{names} {'appears' if len(chs) == 1 else 'each appear'} exactly once in the picture: the reference sheet shows the "
+            f"same person several times, draw {'them' if len(chs) > 1 else 'that person'} only once. ")
 
 
 def anima_pass(png, line, w, h, seed, denoise):
@@ -152,7 +159,8 @@ def main():
             chs = chars_of(slugs)
             nm, per = ref_names(chs, line, o.get("refs", "sheet"))
             w, h = size(shape, o.get("mp", 1.0))
-            pr = prompt_for(line, chs, per, o.get("refs", "sheet") == "sheet", o.get("extra", ""))
+            pr = prompt_for(line, chs, per, o.get("refs", "sheet") == "sheet",
+                            (once_text(chs) if o.get("once") else "") + o.get("extra", ""))
             data = run(klein(pr, nm, w, h, SEED + k, o.get("steps", 4), o.get("bw", True), o.get("unet"), o.get("clip")))
             if o.get("anima"):
                 data = anima_pass(data, line, w, h, SEED + k, o["anima"])

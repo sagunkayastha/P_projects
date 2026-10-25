@@ -104,6 +104,9 @@ def panel_job(pid, idx, seed=None, prm_extra=None):
     prompt = pn["prompt"]
     if chars:
         specs, _ = char_refs(chars, pn["line"] + " " + pn["prompt"])
+        empty = [c["name"] for c, s in zip(chars, specs) if refs.CONT and not s.get("sheet")]
+        if empty:  # never draw a character without its pictures (klein would invent a person)
+            raise PanelError(f"no reference pictures for {', '.join(empty)}")
         params["check_ref"], params["check_name"] = chars[0]["source_image"], chars[0]["name"]
     if refs.CONT:
         scene = page.get("scene") or {}
@@ -121,6 +124,11 @@ def panel_job(pid, idx, seed=None, prm_extra=None):
         if extra:
             prompt = prompt.replace(graphs.STYLE, extra + " " + graphs.STYLE, 1)
     params["prompt"] = prompt
+    # what this panel was given, shown on the page card so a wrong picture explains itself
+    used = [f"{c['name']} sheet" if refs.CONT else c["name"] for c in chars]
+    if refs.CONT:
+        used += [{"plate": "place", "props": "objects", "prev": "previous panel"}[k] for k in slots]
+    params["used"] = " + ".join(used) if used else "no reference"
     if specs:
         params["refs"] = specs
     params.update(prm_extra or {})

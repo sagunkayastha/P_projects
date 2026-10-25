@@ -197,6 +197,7 @@ textarea:focus { border-color: #45505e; }
 .review .two .primary { flex: 1; min-height: 48px; border-radius: 12px; font-size: 16px; }
 .panel .warn { font-size: 12px; color: var(--fail); }
 .panel .fixed { font-size: 12px; color: var(--dim); font-style: italic; }
+.panel .used { font-size: 12px; color: var(--dim); }
 
 /* message tools, like the ComfyUI image chat: Copy prompt / Edit under the message, Try again row under the result */
 .msgtools { display: flex; gap: 6px; justify-content: flex-end; align-self: flex-end; margin-top: -2px; }

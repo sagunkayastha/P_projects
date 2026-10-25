@@ -764,6 +764,7 @@ function pageCard(p) {
         el("span", { class: "num", text: `${i + 1}` })),
       el("div", { class: "n" + (j && j.status === "failed" ? " err" : ""), text: j && j.status === "failed" ? "failed: " + (j.error || "") : running ? jobLine(j) : (who.length ? who.join(" + ") : "no character") }),
       el("div", { class: "line", text: x.line }),
+      j && j.used ? el("div", { class: "used", text: "refs: " + j.used }) : null,
       x.fixed ? el("div", { class: "fixed", text: "spelling fixed (you wrote: " + x.fixed + ")" }) : null,
       x.warn ? el("div", { class: "warn", text: "⚠ " + x.warn }) : null,
       vs.length > 1 ? el("div", { class: "vers" }, vs.map((v, k) => el("button", { class: v.image_id === x.image_id ? "on" : "", "aria-label": `version ${k + 1}`, title: v.line, disabled: running || undefined, onclick: () => pickVersion(p.id, i, v.image_id) },
