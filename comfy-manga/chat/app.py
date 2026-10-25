@@ -198,7 +198,7 @@ SKETCH = ("Image 1 is the user's rough sketch: keep its layout, camera, framing,
           "sketch lines, no construction lines, no pencil smudges, nothing stays rough.")
 
 
-def _sketch_job(text, sketch, chars, owner, seed=None):
+def _sketch_job(text, sketch, chars, owner, seed=None, model="klein"):
     """One finished picture from the user's sketch (klein, the sketch as image 1, keep its layout)."""
     row = db.get("images", sketch)
     w, h = graphs.fit_size(min(2.0, max(0.5, row["w"] / row["h"])), 1.0)
@@ -210,6 +210,9 @@ def _sketch_job(text, sketch, chars, owner, seed=None):
               "No text, no letters, no speech bubbles.").replace("  ", " ")
     params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "refs": [sketch] + refs,
               "sketch": sketch}
+    if model == "qwen":  # Qwen-Image-Edit: inputs are "Picture 1, 2, 3", at most 3
+        params.update(model="qwen", prompt=prompt.replace("Image ", "Picture ").replace("image ", "Picture "),
+                      refs=params["refs"][:3])
     if chars:
         params["chars"] = [c["slug"] for c in chars]
     return worker.add_job("image", params, owner)
@@ -240,7 +243,7 @@ def _edit_job(text, src, edit, chars, owner, seed=None, model="klein"):
     return worker.add_job("image", params, owner)
 
 
-def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima"):
+def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima", scribble=False):
     """Anima (trained on scraped anime art; the user's choice): text only, or steered by the sketch (lineart
     control) and the first character's picture (IP-Adapter: the face drifts more than with klein)."""
     if sketch:
@@ -253,6 +256,8 @@ def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima")
     params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "model": model}
     if sketch:
         params["sketch"] = sketch
+        if scribble:
+            params["scribble"] = True
     if chars:
         params["ipref"] = chars[0]["source_image"]
         params["chars"] = [c["slug"] for c in chars]
@@ -262,10 +267,19 @@ def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima")
 def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein", edit=None):
     if model in graphs.UNETS:  # Anima (beretMix) or Manga Vision
         return _anima_job(text, shape, chars, owner, seed, sketch, model)
+    if model == "q21" and sketch:  # Qwen-Image 2.1 + Fun ControlNet Union on the sketch (test 2026-10-26: 0.6 / 50%)
+        row = db.get("images", sketch)
+        w, h = graphs.fit_size(min(2.0, max(0.5, row["w"] / row["h"])), 1.0)
+        return worker.add_job("image", {"prompt": f"{text.strip().rstrip('.') or 'the scene in the sketch'}. {graphs.STYLE}",
+                                        "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "sketch": sketch,
+                                        "model": "q21", "strength": 0.6, "end": 0.5,
+                                        "neg": "colour, blurry, low quality, text, watermark"}, owner)
+    if model == "scribble" and sketch:  # Anima + Scribble Control LoRA (sketch only)
+        return _anima_job(text, shape, chars, owner, seed, sketch, "anima", scribble=True)
     if sketch and edit in EDIT and text.strip():
         return _edit_job(text, sketch, edit, chars, owner, seed, model)
     if sketch:
-        return _sketch_job(text, sketch, chars, owner, seed)
+        return _sketch_job(text, sketch, chars, owner, seed, model)
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
     if chars:
         refs, cast = _cast(chars, text)
@@ -303,8 +317,8 @@ def send(cid: int, body: dict = Body(...)):
     shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
     chars = _ready_chars(body.get("chars"))
     model = body.get("model") if body.get("model") == "klein" or body.get("model") in graphs.UNETS else "klein"
-    if body.get("model") == "qwen" and sketch and body.get("edit") in EDIT:  # Qwen-Image-Edit: Modify only
-        model = "qwen"
+    if body.get("model") in ("qwen", "scribble", "q21") and sketch:  # Qwen-Edit / Anima Scribble / Qwen 2.1 control: with a picture only
+        model = body.get("model")
     edit = body.get("edit") if sketch and body.get("edit") in EDIT else None
     if edit and not text:
         raise HTTPException(400, "say what to change")

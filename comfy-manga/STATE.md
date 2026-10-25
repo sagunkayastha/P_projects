@@ -47,6 +47,10 @@ Simple, mobile-first manga maker that runs fully locally (ComfyUI in Docker, GPU
     comfyui image (old image tag local/comfyui-manga:cu130-pre-qwen-20261026). Result: klein stays default
     (~/scratch/mangafix/modify/MODELS-REPORT.md); Qwen 20-26 s vs klein 6-8 s. klein Character Consistency LoRA
     downloaded (models/loras), no gain, not used.
+  - 2026-10-26 sketch test (~/scratch/mangafix/sketchtest/SKETCH-REPORT.md, sketch_models.png): klein stays default;
+    Qwen-Edit equal but slower; Anima Scribble LoRA (grainy) and Qwen-Image 2.1 int8 + Fun ControlNet Union (copies
+    or ignores the sketch) not added. Test-only paths in the app API: model "qwen" / "scribble" / "q21" with a sketch
+    (no UI). Qwen 2.1 files (~18 GB) + scribble LoRA kept in models/ until the user decides.
 
 ## Next
 0. 2026-10-26: PC rebooting into Windows. To resume the tests: `docker compose up -d comfyui` then

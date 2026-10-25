@@ -176,6 +176,7 @@ const MODELS = { klein: "klein", anima: "Anima", vision: "Manga Vision" };  // k
 let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein"), edit: "small",
   editModel: LS.get("manga-editmodel", "klein") };  // Modify: klein or Qwen-Edit (the edit models)
 const EDIT_MODELS = { klein: "klein", qwen: "Qwen-Edit" };
+const MODEL_TAGS = { ...EDIT_MODELS, scribble: "Anima Scribble", q21: "Qwen 2.1 + ControlNet" };  // labels on chat messages
 const log = $("#log"), text = $("#text");
 const PH = text.placeholder;
 
@@ -220,7 +221,7 @@ function chatImages() { return msgs.filter((m) => m.job && m.job.image_id).map((
 
 function renderMsg(m) {
   const j = m.job;
-  const tag = [m.edit === "new" ? "New picture" : m.edit === "small" ? "Small change" : "", (m.chars || []).length ? "with " + m.chars.join(", ") : "", (MODELS[m.model] || EDIT_MODELS[m.model]) && m.model !== "klein" ? MODELS[m.model] || EDIT_MODELS[m.model] : ""].filter(Boolean).join(" · ");
+  const tag = [m.edit === "new" ? "New picture" : m.edit === "small" ? "Small change" : "", (m.chars || []).length ? "with " + m.chars.join(", ") : "", (MODELS[m.model] || MODEL_TAGS[m.model]) && m.model !== "klein" ? MODELS[m.model] || MODEL_TAGS[m.model] : ""].filter(Boolean).join(" · ");
   const who = tag ? el("span", { class: "who", text: tag }) : null;
   const res = el("div", { class: "res" });
   if (j && j.image_id) {

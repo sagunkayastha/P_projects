@@ -112,11 +112,17 @@ def _graph(job):
     p = job["params"]
     kind = job["kind"]
     if kind == "image" and p.get("model") in graphs.UNETS:  # the user's model choice in the chat (default klein)
+        if p.get("scribble") and p.get("sketch"):  # Anima + Scribble Control LoRA
+            return "anima", graphs.anima_scribble(p["prompt"], _upload(p["sketch"]), p["w"], p["h"], p["seed"], p["model"])
         if p.get("sketch") or p.get("ipref"):
             return "anima", graphs.anima_guided(p["prompt"], p["w"], p["h"], p["seed"],
                                                 _upload(p["sketch"]) if p.get("sketch") else None,
                                                 _upload(p["ipref"]) if p.get("ipref") else None, p["model"])
         return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"], p["model"])
+    if kind == "image" and p.get("model") == "q21" and p.get("sketch"):  # Qwen-Image 2.1 + Fun ControlNet (sketch)
+        return "q21", graphs.qwen21_control(p["prompt"], _upload(p["sketch"]), p["w"], p["h"], p["seed"],
+                                            p.get("strength", 1.0), p.get("steps", 30), p.get("cfg", 4.0), p.get("neg", ""),
+                                            p.get("end", 1.0), p.get("invert", True))
     if kind == "image" and p.get("model") == "qwen":  # Modify with Qwen-Image-Edit
         return "qwen", graphs.qwen_edit(p["prompt"], _ref_names(p["refs"]), p["w"], p["h"], p["seed"], p.get("angles", False))
     if kind == "image" and p.get("model") == "klein" and not p.get("refs"):

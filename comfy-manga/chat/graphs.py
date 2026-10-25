@@ -48,6 +48,31 @@ def klein_t2i(prompt, w, h, seed):
     return _preview(workflows.bw_finish(wf, ["17", 0], w, h, "app", save_id="18"))
 
 
+SCRIBBLE = "scribble_lora_260405_v1.0.2-step00000300.safetensors"  # Anima Scribble Control LoRA (civitai 2846262)
+
+
+def anima_scribble(prompt, sketch, w, h, seed, model="anima", until=0.4):
+    """Anima steered by the user's sketch through the Scribble Control LoRA: the sketch (inverted = white lines on
+    black, like PiDiNet) as a Cosmos reference latent + the LoRA for the first 40% of the steps, then plain Anima."""
+    wf = workflows.anima(ANIMA_PREFIX + prompt, w, h, seed, "app", ANIMA_NEG)
+    wf["1"]["inputs"]["unet_name"] = UNETS[model]
+    wf["60"] = {"class_type": "LoadImage", "inputs": {"image": sketch}}
+    wf["61"] = {"class_type": "ImageScale", "inputs": {"image": ["60", 0], "upscale_method": "lanczos", "width": w,
+                "height": h, "crop": "center"}}
+    wf["62"] = {"class_type": "ImageInvert", "inputs": {"image": ["61", 0]}}
+    wf["63"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["62", 0], "vae": ["3", 0]}}
+    wf["64"] = {"class_type": "ApplyCosmosReferenceLatent", "inputs": {"model": ["1", 0], "ref_latents.ref_latent_1": ["63", 0]}}
+    wf["65"] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["64", 0], "lora_name": SCRIBBLE, "strength_model": 1.0}}
+    steps, cut = 32, int(32 * until)
+    common = {"noise_seed": seed, "steps": steps, "cfg": 4.0, "sampler_name": "er_sde", "scheduler": "beta",
+              "positive": ["5", 0], "negative": ["6", 0]}
+    wf["66"] = {"class_type": "KSamplerAdvanced", "inputs": {**common, "model": ["65", 0], "add_noise": "enable",
+                "latent_image": ["7", 0], "start_at_step": 0, "end_at_step": cut, "return_with_leftover_noise": "enable"}}
+    wf["8"] = {"class_type": "KSamplerAdvanced", "inputs": {**common, "model": ["1", 0], "add_noise": "disable",
+               "latent_image": ["66", 0], "start_at_step": cut, "end_at_step": 10000, "return_with_leftover_noise": "disable"}}
+    return _preview(workflows.bw_finish(wf, ["9", 0], w, h, "app"))
+
+
 def anima_guided(prompt, w, h, seed, control=None, ref=None, model="anima"):
     """Anima steered by a sketch (ControlNet-LLLite lineart control) and/or a character picture (IP-Adapter)."""
     wf = workflows.anima_control(ANIMA_PREFIX + prompt, control, w, h, seed, "app", 1.0, 0.6, ref=ref,
@@ -88,6 +113,33 @@ def qwen_edit(prompt, images, w, h, seed, angles=False):
                 "latent_image": ["144", 0], "seed": seed, "steps": 4, "cfg": 1.0, "sampler_name": "euler",
                 "scheduler": "simple", "denoise": 1.0}}
     wf["146"] = {"class_type": "VAEDecode", "inputs": {"samples": ["145", 0], "vae": ["3", 0]}}
+    return _preview(workflows.bw_finish(wf, ["146", 0], w, h, "app", save_id="18"))
+
+
+# Qwen-Image 2.1 (int8) + Alibaba PAI Fun ControlNet Union (int8), ComfyUI core nodes (PR #16519)
+Q21 = {"unet": "qwen_image_2.1_int8_convrot.safetensors", "clip": "qwen3vl_8b_w4a8.safetensors",
+       "vae": "qwen_image_2.1_vae_bf16.safetensors", "union": "qwen_image_2.1_fun_controlnet_union_int8_convrot.safetensors"}
+
+
+def qwen21_control(prompt, sketch, w, h, seed, strength=1.0, steps=30, cfg=4.0, neg="", end=1.0, invert=True):
+    """Qwen-Image 2.1 drawing from words, the sketch (inverted: white lines on black) as Fun ControlNet scribble."""
+    wf = {"1": {"class_type": "UNETLoader", "inputs": {"unet_name": Q21["unet"], "weight_dtype": "default"}},
+          "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": Q21["clip"], "type": "qwen_image", "device": "default"}},
+          "3": {"class_type": "VAELoader", "inputs": {"vae_name": Q21["vae"]}},
+          "4": {"class_type": "ModelPatchLoader", "inputs": {"name": Q21["union"]}},
+          "130": {"class_type": "LoadImage", "inputs": {"image": sketch}},
+          "131": {"class_type": "ImageScale", "inputs": {"image": ["130", 0], "upscale_method": "lanczos", "width": w,
+                  "height": h, "crop": "center"}},
+          "132": {"class_type": "ImageInvert", "inputs": {"image": ["131", 0]}},
+          "133": {"class_type": "ZImageFunControlnet", "inputs": {"model": ["1", 0], "model_patch": ["4", 0], "vae": ["3", 0],
+                  "strength": strength, "image": ["132" if invert else "131", 0], "start_percent": 0.0, "end_percent": end}},
+          "140": {"class_type": "TextEncodeQwenImage21", "inputs": {"clip": ["2", 0], "prompt": prompt, "negative_prompt": neg,
+                  "resolution": 1024}},
+          "144": {"class_type": "EmptySD3LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+          "145": {"class_type": "KSampler", "inputs": {"model": ["133", 0], "positive": ["140", 0], "negative": ["140", 1],
+                  "latent_image": ["144", 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler",
+                  "scheduler": "simple", "denoise": 1.0}},
+          "146": {"class_type": "VAEDecode", "inputs": {"samples": ["145", 0], "vae": ["3", 0]}}}
     return _preview(workflows.bw_finish(wf, ["146", 0], w, h, "app", save_id="18"))
 
 
