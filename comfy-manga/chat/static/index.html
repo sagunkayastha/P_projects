@@ -29,6 +29,15 @@
           <button type="button" data-v="wide">Wide</button>
         </div>
         <button type="button" id="charpick" class="chip">With: nobody</button>
+        <button type="button" id="sketchbtn" class="chip">✎ Sketch</button>
+        <button type="button" id="modelbtn" class="chip">Model: klein</button>
+        <input type="file" id="sketchfile" accept="image/*" hidden>
+      </div>
+      <div id="modelnote" class="sub" hidden>Anima: trained on scraped anime art. Follows a sketch less closely; with a character the face may drift. Tap "Model: Anima" to go back to klein.</div>
+      <div id="sketchrow" class="sketchrow" hidden>
+        <img id="sketchimg" alt="your sketch">
+        <span>The picture follows your sketch's layout. Say what it shows (optional).</span>
+        <button type="button" id="sketchx" class="btn small" aria-label="remove sketch">✕</button>
       </div>
       <div class="row">
         <textarea id="text" rows="1" placeholder="a girl on a rooftop at night, wind in her hair" enterkeyhint="send"></textarea>

@@ -71,6 +71,16 @@ main { flex: 1; min-height: 0; position: relative; }
   font-size: 14px; color: var(--dim); max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.on { border-color: var(--accent); color: var(--accent); }
 .row { display: flex; gap: 8px; align-items: flex-end; }
+.sketchrow { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--dim); }
+.sketchrow img { width: 56px; height: 56px; object-fit: contain; background: #fff; border-radius: 8px; flex: none; }
+.sketchrow span { flex: 1; }
+.sketchrow.busy img { opacity: .4; }
+.me .sk { display: block; width: 72px; height: 72px; object-fit: contain; background: #fff; border-radius: 8px;
+  margin-bottom: 6px; }
+.seg.off { opacity: .4; pointer-events: none; }
+.chips { flex-wrap: wrap; }
+.setmodel { margin-top: 10px; width: max-content; }
+.setmodel button:disabled { opacity: .45; text-decoration: line-through; }
 textarea { width: 100%; resize: none; background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
   padding: 10px 12px; font-size: 16px; line-height: 1.35; outline: none; max-height: 160px; }
 textarea:focus { border-color: #45505e; }
@@ -164,6 +174,15 @@ textarea:focus { border-color: #45505e; }
 .sheetbox .two { display: flex; gap: 8px; margin-top: 14px; }
 .sheetbox .two button { flex: 1; min-height: 48px; border-radius: 12px; font-size: 16px; }
 .sheetbox .ghost { background: none; border: 1px solid var(--line); }
+.setupcount { margin: 10px 0 4px; }
+.setup details { border: 1px solid var(--line); border-radius: 12px; margin: 8px 0; padding: 0 10px; }
+.setup summary { min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: 15px; cursor: pointer; }
+.setup summary b { font-weight: 400; color: var(--dim); font-size: 13px; margin-left: auto; }
+.setitem { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.setitem input[type=checkbox] { width: 24px; height: 24px; margin-top: 10px; flex: none; accent-color: var(--accent); }
+.setitem textarea { font-size: 14px; padding: 8px 10px; }
+.setitem.off textarea { opacity: .45; }
+.setup details > .btn { margin: 4px 0 10px; }
 .sheetbox .srcpic { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; float: right; margin: 0 0 8px 10px; }
 .pick { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .pick button { display: flex; align-items: center; gap: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px;

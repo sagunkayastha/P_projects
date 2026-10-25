@@ -34,6 +34,22 @@ def anima_bw(prompt, w, h, seed):
     return _preview(workflows.bw_finish(wf, ["9", 0], w, h, "app"))
 
 
+def klein_t2i(prompt, w, h, seed):
+    """klein 9B from a text prompt only (no reference picture)."""
+    wf = workflows.klein9_refs(prompt, ["none.png"], w, h, seed, "app")
+    for k in ("60", "61", "62", "63", "64"):  # the reference chain of the dummy picture
+        del wf[k]
+    wf["15"]["inputs"]["positive"], wf["15"]["inputs"]["negative"] = ["7", 0], ["8", 0]
+    return _preview(workflows.bw_finish(wf, ["17", 0], w, h, "app", save_id="18"))
+
+
+def anima_guided(prompt, w, h, seed, control=None, ref=None):
+    """Anima steered by a sketch (ControlNet-LLLite lineart control) and/or a character picture (IP-Adapter)."""
+    wf = workflows.anima_control(ANIMA_PREFIX + prompt, control, w, h, seed, "app", 1.0, 0.6, ref=ref,
+                                 neg_extra=ANIMA_NEG[len(workflows.NEG_BW) + 2:])
+    return _preview(wf)
+
+
 def klein_edit(prompt, image, w, h, seed):
     """klein 9B edit of one reference picture (character sets)."""
     wf = workflows.klein9_edit(prompt, image, w, h, seed, "app")

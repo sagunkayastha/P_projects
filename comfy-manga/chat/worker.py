@@ -47,10 +47,20 @@ TRAITS_ASK = ("This is a character design. List the visible traits that must sta
 OUTFITS = studio.OUTFITS + [("sport", "wearing a sports tracksuit and sneakers instead of the usual outfit")]
 
 
-def char_plan():
-    items = [(f"{a}_{e}", f"{ad} The character has a {ed}.") for a, ad in studio.ANGLES for e, ed in studio.EXPRESSIONS]
+def default_setup():
+    """The standard set-up list the Make character page starts from (every item on)."""
+    def part(xs):
+        return [{"key": k, "text": t, "on": True} for k, t in xs]
+    return {"angles": part(studio.ANGLES), "expressions": part(studio.EXPRESSIONS), "outfits": part(OUTFITS)}
+
+
+def char_plan(setup=None):
+    """[(label, instruction)]: the switched-on angles x expressions + the switched-on outfits."""
+    setup = setup or default_setup()
+    on = {k: [(x["key"], x["text"]) for x in setup[k] if x.get("on", True)] for k in ("angles", "expressions", "outfits")}
+    items = [(f"{a}_{e}", f"{ad} The character has a {ed}.") for a, ad in on["angles"] for e, ed in on["expressions"]]
     items += [(f"outfit-{o}", f"Show the same character in a three-quarter view, calm expression, {od}.")
-              for o, od in OUTFITS]
+              for o, od in on["outfits"]]
     return items
 
 
@@ -101,6 +111,14 @@ def _ref_names(specs):
 def _graph(job):
     p = job["params"]
     kind = job["kind"]
+    if kind == "image" and p.get("model") == "anima":  # the user's model choice in the chat (default klein)
+        if p.get("sketch") or p.get("ipref"):
+            return "anima", graphs.anima_guided(p["prompt"], p["w"], p["h"], p["seed"],
+                                                _upload(p["sketch"]) if p.get("sketch") else None,
+                                                _upload(p["ipref"]) if p.get("ipref") else None)
+        return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"])
+    if kind == "image" and p.get("model") == "klein" and not p.get("refs"):
+        return "klein", graphs.klein_t2i(p["prompt"], p["w"], p["h"], p["seed"])
     if kind in ("image", "panel"):
         if p.get("refs"):
             return "klein", graphs.klein_refs(p["prompt"], _ref_names(p["refs"]), p["w"], p["h"], p["seed"])
@@ -176,7 +194,7 @@ def _finish_score(job, ui):
     owner = f"char:{ch['id']}"
     # best of 2: a view that drifted is drawn once more with a new seed; the better try of each view is kept
     if refs.ON and p.get("round", 0) == 0 and p.get("retry", True):
-        plan = dict(char_plan())
+        plan = dict(ch["plan"] or char_plan())
         bad = [it["label"] for it in items.values() if it["drifted"] and it["label"] in plan]
         if bad:
             src = ch["source_image"]

@@ -15,9 +15,9 @@ FRAMING = ["Wide establishing shot that shows the place", "Medium shot", "Close-
            "Medium-wide shot"]
 
 
-def cast_text(chars):
-    """chars: list of {"name", "n" (reference pictures, in order), "traits"}."""
-    parts, k = [], 1
+def cast_text(chars, start=1):
+    """chars: list of {"name", "n" (reference pictures, in order), "traits"}; their pictures start at image `start`."""
+    parts, k = [], start
     for c in chars:
         n = c.get("n", 2)
         imgs = [f"image {i}" for i in range(k, k + n)]

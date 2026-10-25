@@ -172,7 +172,7 @@ let chatId = LS.get("manga-chat", null);
 const pending = new Map();  // ckey -> {text, shape, chars, state, error}
 let msgs = [];
 const rendered = new Map();  // message id -> {sig, node}
-let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []) };
+let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein") };
 const log = $("#log"), text = $("#text");
 
 function setChat(id) {
@@ -216,7 +216,8 @@ function chatImages() { return msgs.filter((m) => m.job && m.job.image_id).map((
 
 function renderMsg(m) {
   const j = m.job;
-  const who = (m.chars || []).length ? el("span", { class: "who", text: "with " + m.chars.join(", ") }) : null;
+  const tag = [(m.chars || []).length ? "with " + m.chars.join(", ") : "", m.model === "anima" ? "Anima" : ""].filter(Boolean).join(" · ");
+  const who = tag ? el("span", { class: "who", text: tag }) : null;
   const res = el("div", { class: "res" });
   if (j && j.image_id) {
     const img = el("img", { src: thumbUrl(j.image_id, "m"), alt: m.text, width: j.w, height: j.h, loading: "lazy" });
@@ -236,7 +237,8 @@ function renderMsg(m) {
     if (j && (j.status === "failed" || j.status === "cancelled")) acts.append(el("button", { class: "btn", onclick: () => again_(m.id, "new") }, "↻ Try again"));
     if (acts.childNodes.length) res.append(acts);
   }
-  const line = el("div", { class: "me" }, m.text, who);
+  const sk = m.sketch ? el("img", { class: "sk", src: thumbUrl(m.sketch), alt: "your sketch" }) : null;
+  const line = el("div", { class: "me" }, sk, m.text || (m.sketch ? "(from my sketch)" : ""), who);
   const cp = el("button", { class: "btn small", onclick: () => copyText(m.text, cp, line) }, "Copy prompt");
   const tools = el("div", { class: "msgtools" }, cp, el("button", { class: "btn small", onclick: () => editMsg(m) }, "Edit"));
   return el("div", { class: "msg", "data-id": m.id }, line, tools, res);
@@ -244,7 +246,8 @@ function renderMsg(m) {
 
 function renderPending(key, p) {
   const node = el("div", { class: "msg pending", "data-key": key },
-    el("div", { class: "me" }, p.text, p.chars.length ? el("span", { class: "who", text: "with " + p.chars.join(", ") }) : null));
+    el("div", { class: "me" }, p.sketch ? el("img", { class: "sk", src: thumbUrl(p.sketch.id), alt: "your sketch" }) : null,
+      p.text || (p.sketch ? "(from my sketch)" : ""), p.chars.length ? el("span", { class: "who", text: "with " + p.chars.join(", ") }) : null));
   if (p.state === "failed") node.append(el("button", { class: "notsent", onclick: () => sendPending(key) }, `Not sent: ${p.error} · tap to retry`));
   else node.append(el("div", { class: "st", text: "sending…" }));
   return node;
@@ -257,7 +260,7 @@ function renderChat() {
   let prev = $("#log-empty");
   let added = false;
   for (const m of msgs) {
-    const sig = JSON.stringify([m.text, m.chars, m.job]);
+    const sig = JSON.stringify([m.text, m.chars, m.job, m.sketch, m.model]);
     let r = rendered.get(m.id);
     if (!r || r.sig !== sig) {
       const node = renderMsg(m);
@@ -285,10 +288,11 @@ $("#composer").addEventListener("submit", (e) => { e.preventDefault(); send(); }
 
 async function send() {
   const t = text.value.trim();
-  if (!t) { text.focus(); return; }
+  if ($("#sketchrow").classList.contains("busy")) { toast("The sketch is still uploading"); return; }
+  if (!t && !state.sketch) { text.focus(); return; }
   const key = uid();
-  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], state: "sending" });
-  text.value = ""; LS.set("manga-draft", ""); autosize();
+  pending.set(key, { text: t, shape: state.shape, chars: [...state.chars], sketch: state.sketch, model: state.model, state: "sending" });
+  text.value = ""; LS.set("manga-draft", ""); autosize(); setSketch(null);
   renderChat(); log.scrollTop = log.scrollHeight;
   await sendPending(key);
 }
@@ -298,7 +302,8 @@ async function sendPending(key) {
   p.state = "sending"; renderChat();
   try {
     await ensureChat();
-    const m = await api("POST", `/api/chats/${chatId}/messages`, { text: p.text, shape: p.shape, chars: p.chars, ckey: key });
+    const m = await api("POST", `/api/chats/${chatId}/messages`, { text: p.text, shape: p.shape, chars: p.chars, ckey: key, model: p.model,
+      ...(p.sketch ? { sketch: p.sketch.id } : {}) });
     pending.delete(key);
     if (!msgs.find((x) => x.id === m.id)) msgs.push(m);
     renderChat(); log.scrollTop = log.scrollHeight;
@@ -335,6 +340,8 @@ function editMsg(m) {  // put this message back in the box to change it; sending
   text.value = m.text; LS.set("manga-draft", text.value); autosize();
   state.chars = (m.chars || []).filter((s) => charBySlug[s]); LS.set("manga-chars", state.chars); paintChips();
   if (m.shape) { state.shape = m.shape; LS.set("manga-shape", state.shape); paintChips(); }
+  setSketch(m.sketch ? { id: m.sketch } : null);
+  if (m.model) { state.model = m.model; LS.set("manga-model", state.model); paintChips(); }
   text.focus(); text.setSelectionRange(text.value.length, text.value.length);
   toast("Change the text, then ➤ to draw it again");
 }
@@ -342,12 +349,65 @@ async function stopJob(jid) {
   try { await api("POST", `/api/jobs/${jid}/cancel`); refresh(); } catch (e) { toast(e.message, { err: true }); }
 }
 
+// the user's own sketch for the next message: the picture keeps its layout (and its shape)
+function setSketch(sk) {
+  state.sketch = sk;
+  const row = $("#sketchrow");
+  row.hidden = !sk; row.classList.remove("busy");
+  if (sk) $("#sketchimg").src = sk.local || thumbUrl(sk.id);
+  $("#shape").classList.toggle("off", !!sk);
+  $("#sketchbtn").classList.toggle("on", !!sk);
+}
+function shrink(file) {  // big phone photos -> at most 1600 px JPEG before upload (the browser applies EXIF rotation)
+  return new Promise((ok) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+      const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob((b) => { URL.revokeObjectURL(url); ok(b || file); }, "image/jpeg", 0.9);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); ok(file); };  // let the server try (or refuse) it
+    img.src = url;
+  });
+}
+$("#sketchbtn").addEventListener("click", () => $("#sketchfile").click());
+$("#modelbtn").addEventListener("click", () => {  // klein 9B (default) or Anima, for the next pictures
+  state.model = state.model === "anima" ? "klein" : "anima"; LS.set("manga-model", state.model); paintChips();
+});
+$("#sketchx").addEventListener("click", () => setSketch(null));
+$("#sketchfile").addEventListener("change", async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const local = URL.createObjectURL(f);
+  setSketch(null);
+  $("#sketchrow").hidden = false; $("#sketchrow").classList.add("busy"); $("#sketchimg").src = local;
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 60000);
+  try {
+    const body = await shrink(f);
+    const r = await fetch("/api/sketch", { method: "POST", body, signal: ctl.signal, headers: { "Content-Type": body.type || "application/octet-stream" } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.detail || `error ${r.status}`);
+    setSketch({ id: j.id, local });
+    text.focus();
+  } catch (err) {
+    setSketch(null);
+    toast("Sketch not added: " + (err.name === "AbortError" ? "upload timed out" : err.message), { err: true });
+  } finally { clearTimeout(t); }
+});
+
 // shape + characters for the next message
 function paintChips() {
   for (const b of $("#shape").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === state.shape);
   const c = $("#charpick");
   c.textContent = state.chars.length ? "With: " + state.chars.map((s) => (charBySlug[s] || { name: s }).name).join(", ") : "With: nobody";
   c.classList.toggle("on", state.chars.length > 0);
+  $("#modelbtn").textContent = state.model === "anima" ? "Model: Anima" : "Model: klein";
+  $("#modelbtn").classList.toggle("on", state.model === "anima");
+  $("#modelnote").hidden = state.model !== "anima";
 }
 $("#shape").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
@@ -543,25 +603,76 @@ $("#sheet").addEventListener("focusin", (e) => {  // keep the box being typed in
   if (e.target.matches("textarea, input")) setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 350);
 });
 
-function makeCharSheet(imageId) {
-  const name = el("input", { type: "text", placeholder: "Name, e.g. Mia", maxlength: "40", enterkeyhint: "go" });
-  const go_ = el("button", { class: "primary", type: "submit" }, "Make character");
+// Make character: a set-up page first (which pictures to draw, in which words), then the set is made
+const SETUP_PARTS = [["angles", "Angles", "Add angle", "e.g. Camera at knee height, the character walks toward it."],
+  ["expressions", "Faces", "Add face", "e.g. crying, tears on the cheeks"],
+  ["outfits", "Outfits", "Add outfit", "e.g. wearing a school uniform instead of the usual outfit"]];
+async function makeCharSheet(imageId) {
+  let setup;
+  try { setup = await api("GET", "/api/charsetup"); } catch (e) { toast(e.message, { err: true }); return; }
+  const std = JSON.parse(JSON.stringify(setup));
+  const name = el("input", { type: "text", placeholder: "Name, e.g. Mia", maxlength: "40", enterkeyhint: "done" });
+  const go_ = el("button", { class: "primary", type: "submit" });
+  const count = el("div", { class: "sub setupcount" });
+  const parts = el("div", { class: "setup" });
+  const on = (k) => setup[k].filter((x) => x.on && x.text.trim()).length;
+  const total = () => on("angles") * on("expressions") + on("outfits");
+  function paintCount() {
+    const n = total();
+    count.textContent = `${on("angles")} angles × ${on("expressions")} faces + ${on("outfits")} outfits = ${n} pictures · about ${Math.max(1, Math.round(n * 7.5 / 60))} min`;
+    go_.textContent = n ? `Make ${n} pictures` : "Switch something on";
+    go_.disabled = !n;
+    for (const [k] of SETUP_PARTS) { const s = parts.querySelector(`[data-part=${k}] summary b`); if (s) s.textContent = `${on(k)} of ${setup[k].length} on`; }
+  }
+  function item(k, x) {
+    const box = el("input", { type: "checkbox", "aria-label": "use this picture" });
+    box.checked = x.on;
+    box.addEventListener("change", () => { x.on = box.checked; row.classList.toggle("off", !x.on); paintCount(); });
+    const ta = el("textarea", { rows: "3", maxlength: "200" });
+    ta.value = x.text;
+    ta.addEventListener("input", () => { x.text = ta.value; paintCount(); });
+    const row = el("div", { class: "setitem" + (x.on ? "" : " off") }, box, ta);
+    if (!std[k].some((s) => s.key === x.key)) row.append(el("button", { type: "button", class: "btn small", "aria-label": "remove",
+      onclick: () => { setup[k].splice(setup[k].indexOf(x), 1); paint(); } }, "✕"));
+    return row;
+  }
+  function paint() {
+    const open = new Set([...parts.querySelectorAll("details[open]")].map((d) => d.dataset.part));
+    parts.replaceChildren(...SETUP_PARTS.map(([k, title, addLabel, hint]) => {
+      const add = el("button", { type: "button", class: "btn small", onclick: () => {
+        const x = { key: "", text: "", on: true }; setup[k].push(x); paint();
+        const tas = parts.querySelectorAll(`[data-part=${k}] textarea`); const ta = tas[tas.length - 1];
+        ta.placeholder = hint; ta.focus();
+      } }, "+ " + addLabel);
+      const d = el("details", { "data-part": k }, el("summary", {}, title, " ", el("b")), ...setup[k].map((x) => item(k, x)), add);
+      if (open.has(k)) d.open = true;
+      return d;
+    }));
+    paintCount();
+  }
+  const reset = el("button", { type: "button", class: "btn small", onclick: () => { setup = JSON.parse(JSON.stringify(std)); paint(); } }, "Back to the standard list");
   const form = el("form", { onsubmit: async (e) => {
     e.preventDefault();
     const n = name.value.trim();
     if (!n) { name.focus(); toast("Give the character a name"); return; }
+    const clean = Object.fromEntries(SETUP_PARTS.map(([k]) => [k, setup[k].filter((x) => x.text.trim())]));
     go_.disabled = true; go_.textContent = "Starting…";
     try {
-      const c = await api("POST", "/api/characters", { image_id: imageId, name: n });
+      const c = await api("POST", "/api/characters", { image_id: imageId, name: n, setup: clean });
       closeOv("sheet");
-      toast(`Making ${c.name}: 28 pictures, about 3 min. You can lock the phone.`, { action: "Show", onaction: () => go("chars"), ms: 6000 });
-    } catch (err) { toast(err.message, { err: true }); go_.disabled = false; go_.textContent = "Make character"; }
+      toast(`Making ${c.name}: ${c.planned} pictures. You can lock the phone.`, { action: "Show", onaction: () => go("chars"), ms: 6000 });
+    } catch (err) { toast(err.message, { err: true }); paintCount(); }
   } },
   el("img", { class: "srcpic", src: thumbUrl(imageId), alt: "" }),
-  el("h2", { text: "Make a character from this picture?" }),
-  el("div", { class: "sub", text: "Draws the same person 28 times (angles, faces, outfits) and keeps the 20 that look most alike. Takes about 3 minutes in the background." }),
+  el("h2", { text: "Make a character from this picture" }),
+  el("div", { class: "sub", text: "Choose the pictures to draw of this person. Tap a part to open it: switch items on or off, change their words, or add your own. Afterwards you check the pictures and keep the good ones." }),
   el("div", { style: "clear:both;height:10px" }), name,
+  el("div", { class: "seg setmodel" }, el("button", { type: "button", class: "on" }, "klein 9B"),
+    el("button", { type: "button", disabled: true }, "Anima")),
+  el("div", { class: "sub", text: "Anima can't make a character set: it has no picture editing, so the person would change from one angle to the next." }),
+  count, parts, reset,
   el("div", { class: "two" }, el("button", { class: "ghost", type: "button", onclick: () => closeOv("sheet") }, "Cancel"), go_));
+  paint();
   openSheet(form);
   setTimeout(() => name.focus(), 50);
 }

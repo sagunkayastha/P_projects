@@ -36,7 +36,7 @@ CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS msg_chat ON messages(chat_id);
 """
 
-JSON_COLS = {"params", "chars", "meta", "refs", "scores", "lines", "panels", "scene"}
+JSON_COLS = {"params", "chars", "meta", "refs", "scores", "lines", "panels", "scene", "plan"}
 
 
 def init():
@@ -58,6 +58,13 @@ def init():
     cols = {r[1] for r in _conn.execute("PRAGMA table_info(characters)")}
     if "traits" not in cols:  # added 2026-10-24: the character's looks in words
         _conn.execute("ALTER TABLE characters ADD COLUMN traits TEXT")
+    if "plan" not in cols:  # added 2026-10-25: the user's set-up list ([label, instruction], ...)
+        _conn.execute("ALTER TABLE characters ADD COLUMN plan TEXT")
+    mcols = {r[1] for r in _conn.execute("PRAGMA table_info(messages)")}
+    if "sketch" not in mcols:  # added 2026-10-25: the user's uploaded sketch (image id) the picture follows
+        _conn.execute("ALTER TABLE messages ADD COLUMN sketch INTEGER")
+    if "model" not in mcols:  # added 2026-10-25: "klein" (default) or "anima"; NULL = before the choice existed
+        _conn.execute("ALTER TABLE messages ADD COLUMN model TEXT")
     pcols = {r[1] for r in _conn.execute("PRAGMA table_info(pages)")}
     for col, typ in (("bible", "TEXT"), ("scene", "TEXT"), ("seed", "INTEGER")):  # added 2026-10-24
         if col not in pcols:

@@ -193,7 +193,52 @@ def _cast(chars, text):
     return pagejobs.char_refs(chars, text)
 
 
-def _chat_job(text, shape, chars, owner, seed=None):
+SKETCH = ("Image 1 is the user's rough sketch: keep its layout, camera, framing, poses and where everything is, and "
+          "turn it into a finished, clean drawing{what}. Confident clean lines, correct anatomy and proportions; no "
+          "sketch lines, no construction lines, no pencil smudges, nothing stays rough.")
+
+
+def _sketch_job(text, sketch, chars, owner, seed=None):
+    """One finished picture from the user's sketch (klein, the sketch as image 1, keep its layout)."""
+    row = db.get("images", sketch)
+    w, h = graphs.fit_size(min(2.0, max(0.5, row["w"] / row["h"])), 1.0)
+    refs, cast = _cast(chars, text) if chars else ([], [])
+    what = f" of: {text.strip().rstrip('.')}" if text.strip() else ""
+    who = f" {writer.cast_text(cast, start=2)} Same face, hair and clothes as the reference sheets." if chars else ""
+    once = f" {pagejobs.once_text([c['name'] for c in chars])}" if chars else ""
+    prompt = (f"{SKETCH.format(what=what)}{who}{once} {pagejobs.ONE} {graphs.STYLE} "
+              "No text, no letters, no speech bubbles.").replace("  ", " ")
+    params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "refs": [sketch] + refs,
+              "sketch": sketch}
+    if chars:
+        params["chars"] = [c["slug"] for c in chars]
+    return worker.add_job("image", params, owner)
+
+
+def _anima_job(text, shape, chars, owner, seed=None, sketch=None):
+    """Anima (trained on scraped anime art; the user's choice): text only, or steered by the sketch (lineart
+    control) and the first character's picture (IP-Adapter: the face drifts more than with klein)."""
+    if sketch:
+        row = db.get("images", sketch)
+        w, h = graphs.fit_size(min(2.0, max(0.5, row["w"] / row["h"])), 1.0)
+    else:
+        w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
+    looks = "; ".join(f"{c['name']}: {c['traits']}" for c in chars if c.get("traits"))
+    prompt = (text or "the scene in the sketch") + (f", {looks}" if looks else "") + ", detailed manga illustration"
+    params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "model": "anima"}
+    if sketch:
+        params["sketch"] = sketch
+    if chars:
+        params["ipref"] = chars[0]["source_image"]
+        params["chars"] = [c["slug"] for c in chars]
+    return worker.add_job("image", params, owner)
+
+
+def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein"):
+    if model == "anima":
+        return _anima_job(text, shape, chars, owner, seed, sketch)
+    if sketch:
+        return _sketch_job(text, sketch, chars, owner, seed)
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
     if chars:
         refs, cast = _cast(chars, text)
@@ -204,8 +249,9 @@ def _chat_job(text, shape, chars, owner, seed=None):
                   f"pictures.{pose} {graphs.STYLE} No text, no letters, no speech bubbles.")
         params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "refs": refs,
                   "chars": [c["slug"] for c in chars]}
-    else:
-        params = {"prompt": text, "text": text, "w": w, "h": h, "seed": seed or worker.seed()}
+    else:  # text only: klein draws it from words (before the model choice, Anima drew these)
+        params = {"prompt": f"{text.strip().rstrip('.')}. {pagejobs.ONE} {graphs.STYLE} No text, no letters, no speech "
+                            f"bubbles.", "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "model": "klein"}
     return worker.add_job("image", params, owner)
 
 
@@ -215,7 +261,10 @@ def send(cid: int, body: dict = Body(...)):
     if not c:
         raise HTTPException(404, "no such chat")
     text = (body.get("text") or "").strip()
-    if not text:
+    sketch = body.get("sketch")
+    if sketch is not None and not (isinstance(sketch, int) and db.get("images", sketch)):
+        raise HTTPException(400, "that sketch is gone; add it again")
+    if not text and not sketch:
         raise HTTPException(400, "empty message")
     if len(text) > 2000:
         raise HTTPException(400, "message too long (max 2000 characters)")
@@ -226,11 +275,13 @@ def send(cid: int, body: dict = Body(...)):
             return _msg_view(old)
     shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
     chars = _ready_chars(body.get("chars"))
-    mid = db.insert("messages", chat_id=cid, text=text, shape=shape, chars=[ch["slug"] for ch in chars], ckey=ckey)
-    jid = _chat_job(text, shape, chars, f"msg:{mid}")
+    model = body.get("model") if body.get("model") in ("klein", "anima") else "klein"
+    mid = db.insert("messages", chat_id=cid, text=text, shape=shape, chars=[ch["slug"] for ch in chars], ckey=ckey,
+                    sketch=sketch, model=model)
+    jid = _chat_job(text, shape, chars, f"msg:{mid}", sketch=sketch, model=model)
     db.update("messages", mid, job_id=jid)
     if not c["title"]:
-        db.update("chats", cid, title=text[:60])
+        db.update("chats", cid, title=text[:60] or "sketch")
     return _msg_view(db.get("messages", mid))
 
 
@@ -243,10 +294,49 @@ def again(mid: int, body: dict = Body(default={})):
     chars = _ready_chars(m["chars"])
     old = db.get("jobs", m["job_id"]) if m["job_id"] else None
     seed = old["params"].get("seed") if old and (body or {}).get("seed") == "same" else None
-    nid = db.insert("messages", chat_id=m["chat_id"], text=m["text"], shape=m["shape"], chars=m["chars"] or [])
-    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}", seed)
+    sketch = m.get("sketch") if m.get("sketch") and db.get("images", m["sketch"]) else None
+    model = m.get("model") or "klein"
+    nid = db.insert("messages", chat_id=m["chat_id"], text=m["text"], shape=m["shape"], chars=m["chars"] or [],
+                    sketch=sketch, model=model)
+    jid = _chat_job(m["text"], m["shape"], chars, f"msg:{nid}", seed, sketch, model)
     db.update("messages", nid, job_id=jid)
     return _msg_view(db.get("messages", nid))
+
+
+@app.post("/api/sketch")
+async def add_sketch(request: Request):
+    """The user's own sketch or picture (raw image bytes, any common format): stored as a gallery picture
+    (source "sketch", greyscale, contrast stretched, at most 2048 px); returns its id for the next message."""
+    data = await request.body()
+    if not data or len(data) > SKETCH_MAX:
+        raise HTTPException(400, f"picture missing or too big (max {SKETCH_MAX // 2**20} MB)")
+    try:
+        png = _sketch_png(data)
+    except Exception:
+        raise HTTPException(400, "not a picture the app can read (use JPG, PNG or WebP)")
+    iid = media.save(png, "sketch", "user sketch")
+    row = db.get("images", iid)
+    return {"id": iid, "w": row["w"], "h": row["h"]}
+
+
+SKETCH_MAX = 25 * 2**20
+
+
+def _sketch_png(data):
+    import io
+
+    from PIL import Image, ImageOps
+    im = Image.open(io.BytesIO(data))
+    im = ImageOps.exif_transpose(im)  # phone photos carry their rotation in EXIF
+    if im.mode in ("RGBA", "LA", "P"):  # transparent drawing-app exports: put them on white paper
+        im = im.convert("RGBA")
+        bg = Image.new("RGBA", im.size, "white")
+        im = Image.alpha_composite(bg, im)
+    im = ImageOps.autocontrast(im.convert("L"), cutoff=1)  # pencil on grey paper -> dark lines on white
+    im.thumbnail((2048, 2048))
+    buf = io.BytesIO()
+    im.convert("RGB").save(buf, "PNG")
+    return buf.getvalue()
 
 
 # ---------- images / gallery ----------
@@ -340,6 +430,43 @@ def _slug(name):
     return s
 
 
+SETUP_MAX = {"angles": 12, "expressions": 6, "outfits": 10}
+
+
+def _setup(raw):
+    """The user's edited set-up list -> a clean one: known parts, short texts, own items get keys "u-<words>"."""
+    if not isinstance(raw, dict):
+        raise HTTPException(400, "bad set-up list")
+    std = worker.default_setup()
+    out = {}
+    for part, most in SETUP_MAX.items():
+        items, seen = [], set()
+        for x in (raw.get(part) or [])[:most]:
+            if not isinstance(x, dict):
+                raise HTTPException(400, "bad set-up list")
+            text = re.sub(r"\s+", " ", str(x.get("text") or "")).strip()[:200]
+            key = str(x.get("key") or "")
+            if key not in {i["key"] for i in std[part]} or key in seen:  # an item the user added
+                base = "u-" + (re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:24] or "item")
+                key, n = base, 1
+                while key in seen:
+                    n += 1
+                    key = f"{base}-{n}"
+            seen.add(key)
+            if text:
+                items.append({"key": key, "text": text, "on": bool(x.get("on", True))})
+        out[part] = items
+    if not worker.char_plan(out):
+        raise HTTPException(400, "switch on at least one picture (an angle with an expression, or an outfit)")
+    return out
+
+
+@app.get("/api/charsetup")
+def char_setup():
+    """The standard list of pictures a new character gets (the set-up page starts from it)."""
+    return worker.default_setup()
+
+
 @app.post("/api/characters")
 def make_character(body: dict = Body(...)):
     name = (body.get("name") or "").strip()
@@ -348,14 +475,15 @@ def make_character(body: dict = Body(...)):
     iid = body.get("image_id")
     if not isinstance(iid, int) or not db.get("images", iid):
         raise HTTPException(404, "no such picture")
+    plan = worker.char_plan(_setup(body.get("setup")) if body.get("setup") is not None else None)
     slug = _slug(name)
-    cid = db.insert("characters", slug=slug, name=name, source_image=iid, status="building", refs=[])
+    cid = db.insert("characters", slug=slug, name=name, source_image=iid, status="building", refs=[], plan=plan)
     # first a trait list from the picture (local vision LLM, only if it is running), used in every prompt
     if refpick.ON:
         worker.add_job("traits", {"char": cid}, f"char:{cid}")
     w, h = studio.SIZE
     s = worker.seed()  # one seed for the whole set: same noise, only the instruction changes
-    for label, change in worker.char_plan():
+    for label, change in plan:
         worker.add_job("charref", {"change": change, "prompt": "", "src": iid, "w": w, "h": h,
                                    "seed": s, "label": label}, f"char:{cid}")
     return _char_view(db.get("characters", cid))
