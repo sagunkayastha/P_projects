@@ -28,9 +28,14 @@ def _preview(wf):
     return wf
 
 
-def anima_bw(prompt, w, h, seed):
+# Anima-family models the user can pick in the chat (diffusion model files in models/diffusion_models)
+UNETS = {"anima": "beretMixAnimaManga_v20.safetensors", "vision": "mangaVisionANIIL_animaV1.safetensors"}
+
+
+def anima_bw(prompt, w, h, seed, model="anima"):
     """Anima Manga picture from a text prompt, true greyscale."""
     wf = workflows.anima(ANIMA_PREFIX + prompt, w, h, seed, "app", ANIMA_NEG)
+    wf["1"]["inputs"]["unet_name"] = UNETS[model]
     return _preview(workflows.bw_finish(wf, ["9", 0], w, h, "app"))
 
 
@@ -43,10 +48,11 @@ def klein_t2i(prompt, w, h, seed):
     return _preview(workflows.bw_finish(wf, ["17", 0], w, h, "app", save_id="18"))
 
 
-def anima_guided(prompt, w, h, seed, control=None, ref=None):
+def anima_guided(prompt, w, h, seed, control=None, ref=None, model="anima"):
     """Anima steered by a sketch (ControlNet-LLLite lineart control) and/or a character picture (IP-Adapter)."""
     wf = workflows.anima_control(ANIMA_PREFIX + prompt, control, w, h, seed, "app", 1.0, 0.6, ref=ref,
                                  neg_extra=ANIMA_NEG[len(workflows.NEG_BW) + 2:])
+    wf["1"]["inputs"]["unet_name"] = UNETS[model]
     return _preview(wf)
 
 

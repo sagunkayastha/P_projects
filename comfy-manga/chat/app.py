@@ -215,7 +215,7 @@ def _sketch_job(text, sketch, chars, owner, seed=None):
     return worker.add_job("image", params, owner)
 
 
-def _anima_job(text, shape, chars, owner, seed=None, sketch=None):
+def _anima_job(text, shape, chars, owner, seed=None, sketch=None, model="anima"):
     """Anima (trained on scraped anime art; the user's choice): text only, or steered by the sketch (lineart
     control) and the first character's picture (IP-Adapter: the face drifts more than with klein)."""
     if sketch:
@@ -225,7 +225,7 @@ def _anima_job(text, shape, chars, owner, seed=None, sketch=None):
         w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
     looks = "; ".join(f"{c['name']}: {c['traits']}" for c in chars if c.get("traits"))
     prompt = (text or "the scene in the sketch") + (f", {looks}" if looks else "") + ", detailed manga illustration"
-    params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "model": "anima"}
+    params = {"prompt": prompt, "text": text, "w": w, "h": h, "seed": seed or worker.seed(), "model": model}
     if sketch:
         params["sketch"] = sketch
     if chars:
@@ -235,8 +235,8 @@ def _anima_job(text, shape, chars, owner, seed=None, sketch=None):
 
 
 def _chat_job(text, shape, chars, owner, seed=None, sketch=None, model="klein"):
-    if model == "anima":
-        return _anima_job(text, shape, chars, owner, seed, sketch)
+    if model in graphs.UNETS:  # Anima (beretMix) or Manga Vision
+        return _anima_job(text, shape, chars, owner, seed, sketch, model)
     if sketch:
         return _sketch_job(text, sketch, chars, owner, seed)
     w, h = graphs.SHAPES.get(shape, graphs.SHAPES["tall"])
@@ -275,7 +275,7 @@ def send(cid: int, body: dict = Body(...)):
             return _msg_view(old)
     shape = body.get("shape") if body.get("shape") in graphs.SHAPES else "tall"
     chars = _ready_chars(body.get("chars"))
-    model = body.get("model") if body.get("model") in ("klein", "anima") else "klein"
+    model = body.get("model") if body.get("model") == "klein" or body.get("model") in graphs.UNETS else "klein"
     mid = db.insert("messages", chat_id=cid, text=text, shape=shape, chars=[ch["slug"] for ch in chars], ckey=ckey,
                     sketch=sketch, model=model)
     jid = _chat_job(text, shape, chars, f"msg:{mid}", sketch=sketch, model=model)

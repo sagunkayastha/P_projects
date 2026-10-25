@@ -111,12 +111,12 @@ def _ref_names(specs):
 def _graph(job):
     p = job["params"]
     kind = job["kind"]
-    if kind == "image" and p.get("model") == "anima":  # the user's model choice in the chat (default klein)
+    if kind == "image" and p.get("model") in graphs.UNETS:  # the user's model choice in the chat (default klein)
         if p.get("sketch") or p.get("ipref"):
             return "anima", graphs.anima_guided(p["prompt"], p["w"], p["h"], p["seed"],
                                                 _upload(p["sketch"]) if p.get("sketch") else None,
-                                                _upload(p["ipref"]) if p.get("ipref") else None)
-        return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"])
+                                                _upload(p["ipref"]) if p.get("ipref") else None, p["model"])
+        return "anima", graphs.anima_bw(p["prompt"], p["w"], p["h"], p["seed"], p["model"])
     if kind == "image" and p.get("model") == "klein" and not p.get("refs"):
         return "klein", graphs.klein_t2i(p["prompt"], p["w"], p["h"], p["seed"])
     if kind in ("image", "panel"):

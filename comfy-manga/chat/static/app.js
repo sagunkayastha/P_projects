@@ -172,6 +172,7 @@ let chatId = LS.get("manga-chat", null);
 const pending = new Map();  // ckey -> {text, shape, chars, state, error}
 let msgs = [];
 const rendered = new Map();  // message id -> {sig, node}
+const MODELS = { klein: "klein", anima: "Anima", vision: "Manga Vision" };  // klein 9B (default); the others are Anima models
 let state = { shape: LS.get("manga-shape", "tall"), chars: LS.get("manga-chars", []), sketch: null, model: LS.get("manga-model", "klein") };
 const log = $("#log"), text = $("#text");
 
@@ -216,7 +217,7 @@ function chatImages() { return msgs.filter((m) => m.job && m.job.image_id).map((
 
 function renderMsg(m) {
   const j = m.job;
-  const tag = [(m.chars || []).length ? "with " + m.chars.join(", ") : "", m.model === "anima" ? "Anima" : ""].filter(Boolean).join(" · ");
+  const tag = [(m.chars || []).length ? "with " + m.chars.join(", ") : "", MODELS[m.model] && m.model !== "klein" ? MODELS[m.model] : ""].filter(Boolean).join(" · ");
   const who = tag ? el("span", { class: "who", text: tag }) : null;
   const res = el("div", { class: "res" });
   if (j && j.image_id) {
@@ -374,8 +375,9 @@ function shrink(file) {  // big phone photos -> at most 1600 px JPEG before uplo
   });
 }
 $("#sketchbtn").addEventListener("click", () => $("#sketchfile").click());
-$("#modelbtn").addEventListener("click", () => {  // klein 9B (default) or Anima, for the next pictures
-  state.model = state.model === "anima" ? "klein" : "anima"; LS.set("manga-model", state.model); paintChips();
+$("#modelbtn").addEventListener("click", () => {  // tap: next model, for the next pictures
+  const ks = Object.keys(MODELS);
+  state.model = ks[(ks.indexOf(state.model) + 1) % ks.length]; LS.set("manga-model", state.model); paintChips();
 });
 $("#sketchx").addEventListener("click", () => setSketch(null));
 $("#sketchfile").addEventListener("change", async (e) => {
@@ -405,9 +407,11 @@ function paintChips() {
   const c = $("#charpick");
   c.textContent = state.chars.length ? "With: " + state.chars.map((s) => (charBySlug[s] || { name: s }).name).join(", ") : "With: nobody";
   c.classList.toggle("on", state.chars.length > 0);
-  $("#modelbtn").textContent = state.model === "anima" ? "Model: Anima" : "Model: klein";
-  $("#modelbtn").classList.toggle("on", state.model === "anima");
-  $("#modelnote").hidden = state.model !== "anima";
+  if (!MODELS[state.model]) state.model = "klein";
+  $("#modelbtn").textContent = "Model: " + MODELS[state.model];
+  $("#modelbtn").classList.toggle("on", state.model !== "klein");
+  $("#modelnote").hidden = state.model === "klein";
+  $("#modelnote").textContent = `${MODELS[state.model]}: follows a sketch less closely; with a character the face may drift. Tap the model button to switch.`;
 }
 $("#shape").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
@@ -668,8 +672,8 @@ async function makeCharSheet(imageId) {
   el("div", { class: "sub", text: "Choose the pictures to draw of this person. Tap a part to open it: switch items on or off, change their words, or add your own. Afterwards you check the pictures and keep the good ones." }),
   el("div", { style: "clear:both;height:10px" }), name,
   el("div", { class: "seg setmodel" }, el("button", { type: "button", class: "on" }, "klein 9B"),
-    el("button", { type: "button", disabled: true }, "Anima")),
-  el("div", { class: "sub", text: "Anima can't make a character set: it has no picture editing, so the person would change from one angle to the next." }),
+    el("button", { type: "button", disabled: true }, "Anima"), el("button", { type: "button", disabled: true }, "Manga Vision")),
+  el("div", { class: "sub", text: "Anima and Manga Vision can't make a character set: they have no picture editing, so the person would change from one angle to the next." }),
   count, parts, reset,
   el("div", { class: "two" }, el("button", { class: "ghost", type: "button", onclick: () => closeOv("sheet") }, "Cancel"), go_));
   paint();

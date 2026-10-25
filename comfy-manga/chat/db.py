@@ -63,7 +63,7 @@ def init():
     mcols = {r[1] for r in _conn.execute("PRAGMA table_info(messages)")}
     if "sketch" not in mcols:  # added 2026-10-25: the user's uploaded sketch (image id) the picture follows
         _conn.execute("ALTER TABLE messages ADD COLUMN sketch INTEGER")
-    if "model" not in mcols:  # added 2026-10-25: "klein" (default) or "anima"; NULL = before the choice existed
+    if "model" not in mcols:  # added 2026-10-25: "klein" (default), "anima" or "vision"; NULL = before the choice existed
         _conn.execute("ALTER TABLE messages ADD COLUMN model TEXT")
     pcols = {r[1] for r in _conn.execute("PRAGMA table_info(pages)")}
     for col, typ in (("bible", "TEXT"), ("scene", "TEXT"), ("seed", "INTEGER")):  # added 2026-10-24
