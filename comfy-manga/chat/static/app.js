@@ -697,12 +697,15 @@ lineIds.forEach((id, i) => { const t = $("#" + id); t.value = pageDraft[i] || ""
 async function loadPages() {
   await loadCharList();
   const ready = chars.filter((c) => c.status === "ready");
-  for (const s of [...pageSel]) if (!charBySlug[s] || charBySlug[s].status !== "ready") pageSel.delete(s);
+  // drop a pick only when the character is gone; one that is busy for a moment (face check...) stays picked
+  // (dropping it silently made pages with the other character only)
+  for (const s of [...pageSel]) if (!charBySlug[s]) pageSel.delete(s);
+  const shown = [...ready, ...chars.filter((c) => c.status !== "ready" && pageSel.has(c.slug))];
   const pc = $("#pagechars");
-  pc.replaceChildren(...(ready.length ? ready.map((c) => el("button", { type: "button", class: "chip" + (pageSel.has(c.slug) ? " on" : ""), onclick: () => {
+  pc.replaceChildren(...(shown.length ? shown.map((c) => el("button", { type: "button", class: "chip" + (pageSel.has(c.slug) ? " on" : ""), onclick: () => {
     if (pageSel.has(c.slug)) pageSel.delete(c.slug); else if (pageSel.size < 2) pageSel.add(c.slug); else toast("2 characters at most");
     LS.set("manga-pagechars", [...pageSel]); loadPages();
-  } }, c.name)) : [el("span", { class: "sub", text: "No characters yet: make one from any picture (★). Without one the page uses no reference." })]));
+  } }, c.status === "ready" ? c.name : `${c.name} (busy)`)) : [el("span", { class: "sub", text: "No characters yet: make one from any picture (★). Without one the page uses no reference." })]));
   const pages = await api("GET", "/api/pages");
   renderKeyed($("#pagelist"), pageNodes, pages, pageCard, pageSig, patchPage);
 }
@@ -891,6 +894,8 @@ $("#pageform").addEventListener("submit", async (e) => {
     return;
   }
   let pick = [...pageSel];
+  const busy = pick.filter((s) => charBySlug[s] && charBySlug[s].status !== "ready");
+  if (busy.length) { toast(`${charBySlug[busy[0]].name} is still busy: wait a moment or unpick it`, { err: true }); return; }
   if (!pick.length) {
     const r = await noCharSheet(lines);
     if (!r.go) return;
