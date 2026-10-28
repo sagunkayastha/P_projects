@@ -28,6 +28,19 @@ Other notes:
   (`opencode run --standalone`; maybe a one-off). Watch for it.
 - Speed: the time is mostly the model thinking between steps (~5-7 s per turn); page loads are quick.
 
+## Extra task (user request): eBay, refurbished Sony WH-1000XM6 (ornith)
+
+PASS, slow. 590 s, 44 steps, 43 tool calls, 0 errors. Watched live by the user in the test Chrome.
+- Used eBay's search box, then ticked all 4 refurbished conditions (Certified / Excellent / Very Good / Good).
+- Answer: 5 cheapest XM6 headphones, refurbished: $233.99 (Good, Midnight Blue), $239.99 (Very Good, Black),
+  $239.99 (Very Good, Midnight Blue), $254.99 (Excellent, Platinum Silver), $259.99 (Very Good, Sandstone), all free
+  delivery. Checked against the live results page afterwards: all 5 listings, ids, prices and conditions match,
+  and they are the only XM6 headphones on that page. It correctly left out XM5/XM4 and the WF-1000XM6 earbuds.
+- What was slow: ~20 of the 43 calls were it fighting the format of `evaluate_script` results (wrote an `unwrap()`
+  helper and rewrote it ~15 times), plus one reload because the first eBay load was not ready.
+- Read-only: no login, cart, watchlist or bid.
+- Video: `shots/t5-ebay-ornith.mp4` (98 s, sped up ~6x). Transcript `runs/ornith/t5-ebay.jsonl`.
+
 ## ornith-q6 (extra, 2 tasks)
 
 Not tested: `ornith-q6` **failed to load** both times (`cudaMalloc failed: out of memory` on CUDA0,
