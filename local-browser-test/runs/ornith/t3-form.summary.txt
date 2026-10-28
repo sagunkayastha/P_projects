@@ -1,0 +1,45 @@
+time_s=129 rc=0 steps=22 tool_calls=21 tool_errors=2
+   execute[completed]: {"code": "tools.opencode.list_mcp_resources({})"}
+   execute[completed]: {"code": "search({ query: \"navigate open page goto url\", namespace: \"cdt\", limit: 30 })"}
+   execute[completed]: {"code": "tools.cdt.list_pages()"}
+   execute[completed]: {"code": "tools.cdt.select_page({ pageId: 1, bringToFront: true })"}
+   execute[completed]: {"code": "tools.cdt.navigate_page({ pageId: 1, type: \"url\", url: \"https://httpbin.org/forms/post\", timeout: 30000 })"}
+   execute[completed]: {"code": "tools.cdt.take_snapshot({ pageId: 1, verbose: true })"}
+   execute[completed]: {"code": "tools.cdt.fill_form({ pageId: 1, includeSnapshot: true, elements: [\n  { uid: \"1_8\", value: \"Test User\" },\n  { uid: \"1_13\", value: \"555-0100\"
+   execute[completed]: {"code": "tools.cdt.fill({ pageId: 1, includeSnapshot: true, uid: \"1_61\", value: \"7\" })"}
+   execute[completed]: {"code": "tools.cdt.evaluate_script({ pageId: 1, waitForStableDom: false, function: `() => {\n  const timeInput = document.querySelector('input[type=\"time\"]')
+   execute[completed]: {"code": "tools.cdt.evaluate_script({ pageId: 1, waitForStableDom: true, function: `() => {\n  const input = document.querySelector('input[name=\"delivery\"]');
+   execute[completed]: {"code": "tools.cdt.take_snapshot({ pageId: 1, verbose: true })"}
+   execute[completed]: {"code": "const pageId = 1;\n\n// 1) Gather final values of every field.\nconst summary = await tools.cdt.evaluate_script({\n  pageId,\n  waitForStableDom: true
+   execute[completed]: {"code": "const pageId = 1;\nconst summary = await tools.cdt.evaluate_script({\n  pageId,\n  waitForStableDom: true,\n  function: `() => {\n    const form = doc
+   execute[completed]: {"code": "const pageId = 1;\nconst summary = await tools.cdt.evaluate_script({\n  pageId,\n  waitForStableDom: true,\n  function: `() => {\n    const form = doc
+   glob[completed]: {"pattern": "shots/**", "path": "/home/sgkayast/Others/P_projects"}
+   glob[completed]: {"pattern": "**/t3-filled.png", "path": "/home/sgkayast/Others/P_projects", "hidden": true}
+   read[error]: {"path": "/home/sgkayast/Others/P_projects/local-browser-test/shots/t3-filled.png"}
+   execute[completed]: {"code": "const pageId = 1;\n// Re-capture to ensure a valid, complete PNG at the expected shots folder.\nawait tools.cdt.take_screenshot({\n  pageId,\n  format
+   read[completed]: {"path": "/home/sgkayast/Others/P_projects/local-browser-test/shots"}
+   read[error]: {"path": "/home/sgkayast/Others/P_projects/local-browser-test/shots/t3-filled.png"}
+   execute[completed]: {"code": "const pageId = 1;\nreturn await tools.cdt.take_screenshot({ pageId, format: \"png\", quality: 95, fullPage: true });"}
+FINAL ANSWER:
+Done. The form at https://httpbin.org/forms/post is fully filled in, and I did **not** submit it — no click on "Submit order" and no Enter was pressed (text/radio/checkbox fields were filled via `fill_form`, and the time was set programmatically on the underlying `<input type="time">` so the picker re-rendered).
+
+The screenshot is saved to `/shots/t3-filled.png` → absolute path:
+`/home/sgkayast/Others/P_projects/local-browser-test/shots/t3-filled.png`
+(Note: the tool resolved the leading-slash `shots/` relative to the session working directory, so it landed in the project's `shots/` folder. See the full page screenshot below.)
+
+**Value each field now holds:**
+
+| Field | Value | Submitted value |
+|---|---|---|
+| Customer name | **Test User** | `customer = "Test User"` |
+| Telephone | **555-0100** | `telephone = "555-0100"` |
+| E-mail address | **test@example.com** | `email = "test@example.com"` |
+| Pizza size | **Medium** (radio selected) | `size = "medium"` |
+| Toppings | **Bacon ✅, Onion ✅** (Extra Cheese & Mushroom unchecked) | `topping = [bacon, onion]` |
+| Preferred delivery time | **19:30** → picker shows **07:30 PM** (12‑hour display; input value = `19:30`) | `delivery = "19:30"` |
+| Delivery instructions | **Ring the bell** | `comments = "Ring the bell"` |
+
+The time field is a 12-hour picker, so it visually reads `07:30 PM` while its actual value (and what gets posted) is `19:30`. Everything matches your request.
+
+Screenshot:
+<p><img src="file:///home/sgkayast/Others/P_projects/local-browser-test/shots/t3-filled.png" width="720" /></p>
