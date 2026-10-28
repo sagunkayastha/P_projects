@@ -1,0 +1,42 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "cdt": {
+      "type": "local",
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "--user",
+        "1000:1000",
+        "--network",
+        "host",
+        "--label",
+        "local-browser-test=1",
+        "-v",
+        "/home/sgkayast/Others/P_projects/local-browser-test/shots:/shots",
+        "--entrypoint",
+        "chrome-devtools-mcp",
+        "local-browser-test/cdt-mcp:1.11.0",
+        "--browserUrl",
+        "http://127.0.0.1:9333",
+        "--workspace",
+        "/shots",
+        "--usageStatistics=false"
+      ],
+      "enabled": true,
+      "timeout": 60000
+    }
+  },
+  "permission": {
+    "bash": "deny",
+    "edit": "deny",
+    "webfetch": "deny",
+    "websearch": "deny",
+    "task": "deny",
+    "external_directory": "deny",
+    "question": "deny",
+    "skill": "deny"
+  }
+}

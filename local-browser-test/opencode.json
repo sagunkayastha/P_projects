@@ -23,7 +23,11 @@
         "http://127.0.0.1:9333",
         "--workspace",
         "/shots",
-        "--usageStatistics=false"
+        "--usageStatistics=false",
+        "--categoryPerformance=false",
+        "--categoryNetwork=false",
+        "--categoryEmulation=false",
+        "--categoryMemory=false"
       ],
       "enabled": true,
       "timeout": 60000
@@ -37,6 +41,14 @@
     "task": "deny",
     "external_directory": "deny",
     "question": "deny",
-    "skill": "deny"
+    "skill": "deny",
+    "read": "deny",
+    "glob": "deny",
+    "grep": "deny",
+    "list": "deny"
+  },
+  "tool_output": {
+    "max_lines": 300,
+    "max_bytes": 8192
   }
 }

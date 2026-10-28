@@ -1,0 +1,79 @@
+time_s=573 rc=0 steps=47 tool_calls=46 tool_errors=1 tokens_in=57096 out=46517 think=0 cache_read=898861 max_ctx_step=47529
+   execute[completed]: {"code": "// Explore what's available: list MCP servers/resources and models\nconst mcp = await tools.opencode.list_mcp_resources({});\nconsole.log('MCP servers
+   execute[completed]: {"code": "// Search for all cdt browser tools to build a complete picture\nconst res = await search({ query: \"cdt page browser snapshot navigate url\", namespa
+   execute[completed]: {"code": "const res1 = await search({ query: \"navigate\", limit: 20 });\nconsole.log('navigate:', res1.items.length, 'remaining', res1.remaining);\nconst res2 
+   execute[completed]: {"code": "const res = await search({ query: \"navigate_page new_page take_snapshot select_page wait_for press_key fill click\", limit: 40 });\nfor (const item o
+   execute[completed]: {"code": "const pages = await tools.cdt.list_pages();\nconsole.log('PAGES:', JSON.stringify(pages, null, 2));"}
+   execute[completed]: {"code": "await tools.cdt.select_page({ pageId: 1, bringToFront: true });\nconst snap = await tools.cdt.take_snapshot({ pageId: 1 });\nconsole.log(typeof snap);
+   execute[completed]: {"code": "await tools.cdt.navigate_page({ pageId: 1, type: \"url\", url: \"https://www.ebay.com\" });\nconsole.log('navigated');"}
+   execute[completed]: {"code": "await tools.cdt.wait_for({ pageId: 1, text: [\"Search\", \"Shop by category\", \"eBay\"] });\nconst snap = await tools.cdt.take_snapshot({ pageId: 1, 
+   execute[completed]: {"code": "// Type into search box then submit\nawait tools.cdt.fill({ pageId: 1, uid: \"2_35\", value: \"Sony WH-1000XM6\" });\nconsole.log('filled search box')
+   execute[completed]: {"code": "await tools.cdt.wait_for({ pageId: 1, text: [\"Search\", \"Items\"] });\nconst url = await tools.cdt.evaluate_script({ pageId: 1, function: () => wind
+   execute[completed]: {"code": "await tools.cdt.wait_for({ pageId: 1, text: [\"Items\", \"to sell\"] });\nconst snap = await tools.cdt.take_snapshot({ pageId: 1 });\nconsole.log(snap
+   execute[completed]: {"code": "await tools.cdt.take_snapshot({ pageId: 1, verbose: true, filePath: \"/home/sgkayast/Others/P_projects/local-browser-test/.scratch/srp_full.txt\" });\
+   execute[completed]: {"code": "const fs = await import('fs');\nawait fs.promises.mkdir('/home/sgkayast/Others/P_projects/.scratch', { recursive: true });\nawait tools.cdt.take_snaps
+   execute[completed]: {"code": "await tools.cdt.take_snapshot({ pageId: 1, verbose: true, filePath: \"/home/sgkayast/Others/P_projects/.scratch/srp_full.txt\" });\nconsole.log('saved
+   execute[completed]: {"code": "const snap = await tools.cdt.take_snapshot({ pageId: 1 });\nconst text = snap.toString();\n// Find Condition / Refurbish / Used tiles in the filters a
+   execute[completed]: {"code": "const snap = await tools.cdt.take_snapshot({ pageId: 1 });\nconst text = snap.toString();\nconst idx = text.indexOf('Condition');\nconsole.log('--- be
+   execute[completed]: {"code": "await tools.cdt.click({ pageId: 1, uid: \"4_186\", includeSnapshot: true });\nconsole.log('clicked Refurbished filter');"}
+   execute[completed]: {"code": "const fn = `() => {\n  const wrap = document.querySelector('div.srp-results-core');\n  if (!wrap) return {note:'no srp-results-core', url: window.loca
+   execute[completed]: {"code": "const fn = `() => {\n  const info = {};\n  info.countListItem = document.querySelectorAll('.listItem').length;\n  info.countSrpResultsCore = document.
+   execute[completed]: {"code": "const fn = `() => {\n  // find elements that look like the results grid\n  const all = document.querySelectorAll('*');\n  const candidates = [];\n  fo
+   execute[completed]: {"code": "const fn = `() => {\n  const ul = document.querySelector('ul.srp-results');\n  if (!ul) return {note:'no ul.srp-results'};\n  const lis = Array.from(u
+   execute[completed]: {"code": "const fn = `() => {\n  const ul = document.querySelector('ul.srp-results');\n  if (!ul) return {note:'no ul.srp-results'};\n  const lis = Array.from(u
+   execute[completed]: {"code": "const fn = `() => {\n  const ul = document.querySelector('ul.srp-results');\n  const lis = Array.from(ul.children);\n  // Identify which li are \"main
+   execute[completed]: {"code": "const fn = `() => {\n  const ul = document.querySelector('ul.srp-results');\n  const lis = Array.from(ul.children);\n  const li0 = lis[0];\n  const in
+   execute[completed]: {"code": "const fn = `() => {\n  const ul = document.querySelector('ul.srp-results');\n  const li0 = Array.from(ul.children)[0];\n  const inner = li0.firstEleme
+   execute[completed]: {"code": "const fn = `() => {\n  const ul = document.querySelector('ul.srp-results');\n  const lis = Array.from(ul.children);\n  const extract = (li) => {\n    
+   execute[completed]: {"code": "const fn = `() => {\n  const ul = document.querySelector('ul.srp-results');\n  const lis = Array.from(ul.children);\n  const norm = (s) => (s||'').rep
+   execute[completed]: {"code": "// First, list pages to get the current pageId and confirm eBay SRP is open\nconst { items } = await tools[\"cdt\"][\"list_pages\"]();\nreturn JSON.st
+   execute[completed]: {"code": "const result = await tools[\"cdt\"][\"list_pages\"]();\nreturn result;\n"}
+   execute[completed]: {"code": "const res = await tools[\"search\"]({ query: \"evaluate_script\", namespace: \"cdt\" });\nreturn JSON.stringify(res);\n"}
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const out = [];\n  for (const card of cards) {
+   read[error]: {"path": "/home/sgkayast/.local/share/opencode/tool-output/tool_184bba3e7002DFox0Qh9UA2SdQ"}
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const seen = new Set();\n  const out = [];\n  
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const dump = [];\n  for (let i = 0; i < Math.m
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const dump = [];\n  for (let i = 0; i < Math.m
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+   execute[completed]: {"code": "const js = `\n() => {\n  const cards = Array.from(document.querySelectorAll('ul.srp-results > li'));\n  const byId = new Map();\n  for (const card of 
+FINAL ANSWER:
+The extraction is now correct — **11 relevant XM6 listings** found after excluding wrong models/earbuds/accessories. The table has minor cosmetic glitches from my string building; let me give you the clean final report with all verified data.
+
+## ✅ Task complete — Read-only browse of eBay for refurbished Sony WH-1000XM6
+
+**What I did:** Searched eBay (category: Headphones) for "Sony WH-1000XM6", applied the **Certified/Good/Very Good/Excellent - Refurbished** condition filter (`LH_ItemCondition=2000`), extracted all 25 result cards, deduped by `/itm/<id>`, then filtered out accessories, earbuds (WF series), and wrong models (XM4/XM5).
+
+### 🥇 The 5 cheapest relevant listings
+
+| # | Listing (title) | Condition | Price (paid) | Shipping | URL |
+|---|-----------------|-----------|--------------|----------|-----|
+| 1 | Sony WH-1000XM6 Wireless Noise Cancelling Headphones — Sand Pink | Certified - Refurbished | $269.99 | Free delivery (2–4 days) | [open](https://www.ebay.com/itm/278359700810) |
+| 2 | Sony WH-1000XM6/G Wireless Noise Cancelling Headphones — Olive Gray | Certified - Refurbished | $269.99 | Free delivery (2–4 days) | [open](https://www.ebay.com/itm/318886204844) |
+| 3 | SONY WH-1000XM6/T "The Best" Noise Cancelling Wireless Headphones — Sandstone | Certified - Refurbished | $269.99 | Free delivery (2–4 days) | [open](https://www.ebay.com/itm/318847936556) |
+| 4 | Sony WH-1000XM6 "The Best" Wireless Noise Canceling Bluetooth Headphones | Certified - Refurbished | $285.00 | Free delivery (2–4 days) | [open](https://www.ebay.com/itm/278359685103) |
+| 5 | Sony WH-1000XM6 "Best Wireless Noise Canceling Headphones" — Black | Certified Sony Refurbished w/ 2-Yr Warranty | $360 (was $449.99) | Free delivery | [open](https://www.ebay.com/itm/317159518381) |
+
+**Cheapest overall: ~$269.99** (the 3 secondipity listings, all Certified–Refurbished, free shipping). The "Best"/"The Best" titles are Sony's official refurbished line — genuine XM6s in different colors.
+
+### ❌ Excluded (with reason)
+- **XM5 (wrong model):** $143.00 Smoky Pink, $147.26 (L), $152.00 Silver & Black, $285.00, $299.95 Silver, $368.99 Silver CR, $395.00 Black
+- **XM4 (wrong model):** $159.99 Black
+- **Earbuds WF series (not over-ear XM6):** WF-1000XM5 $149.99, WF-1000XM5 earbuds $188, WF1000XM6/B $266, WF-1000XM6 earbuds $266
+- **Gaming:** INZONE H9 II $199
+
+### Notes / caveats
+- The two Deco-Gear "Sony Wireless NC Headphones Platinum Refurbished" listings at **$360** (ids `318524954483`, `336664519174`) are also relevant XM6 options — I put #5 as the clearer "Best…Black" one since its title explicitly says XM6.
+- **Collexion editions** (XM6 limited versions) also exist at **$370**: `278359701270` (Black, WH-1000XX/B) and `267780731423` (White, WH-1000XX/W).
+- Titles kept eBay's full vendor naming; prices show amount paid. All 5 have free shipping.
+
+Want me to open any of these listing pages for a deeper read-only check (seller, warranty details, stock), or adjust the filter (e.g., include "Good" vs only "Certified")?
+ROUTER: requests=49 prompt_tokens_processed=64452 prompt_time_s=53.1 gen_tokens=49962 full_reprocess=1 checkpoint_restores=11 requests_over_5k_prompt=2 max_prompt_chunk=5446

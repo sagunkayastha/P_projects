@@ -22,7 +22,7 @@ if [ "$(docker inspect -f '{{.State.Running}}' lbt-chat-mcp 2>/dev/null)" != tru
 docker rm -f lbt-chat-mcp >/dev/null 2>&1 || true
 docker run -d --name lbt-chat-mcp --network host --user 1000:1000 --label local-browser-test=1 \
   -v "$PWD/docker/trim.mjs:/trim.mjs:ro" --entrypoint supergateway local-browser-test/cdt-mcp:1.11.0 \
-  --stdio "node /trim.mjs chrome-devtools-mcp --browserUrl http://127.0.0.1:9333 --usageStatistics=false" \
+  --stdio "node /trim.mjs chrome-devtools-mcp --browserUrl http://127.0.0.1:9333 --usageStatistics=false --categoryPerformance=false --categoryNetwork=false --categoryEmulation=false --categoryMemory=false" \
   --outputTransport streamableHttp --stateful --host 127.0.0.1 --port 8940 \
   --cors "http://127.0.0.1:11434" "http://localhost:11434" --logLevel info >/dev/null
 fi
