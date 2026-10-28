@@ -17,11 +17,14 @@ if ! curl -s -m 2 127.0.0.1:9334/json/version >/dev/null; then
     --remote-debugging-address=127.0.0.1 --no-first-run --no-default-browser-check --disable-sync \
     --window-size=1100,950 http://127.0.0.1:11434/ >/dev/null 2>&1
 fi
+# keep a running bridge (restarting it drops the chat page's MCP session)
+if [ "$(docker inspect -f '{{.State.Running}}' lbt-chat-mcp 2>/dev/null)" != true ]; then
 docker rm -f lbt-chat-mcp >/dev/null 2>&1 || true
 docker run -d --name lbt-chat-mcp --network host --user 1000:1000 --label local-browser-test=1 \
   -v "$PWD/docker/trim.mjs:/trim.mjs:ro" --entrypoint supergateway local-browser-test/cdt-mcp:1.11.0 \
   --stdio "node /trim.mjs chrome-devtools-mcp --browserUrl http://127.0.0.1:9333 --usageStatistics=false" \
   --outputTransport streamableHttp --stateful --host 127.0.0.1 --port 8940 \
   --cors "http://127.0.0.1:11434" "http://localhost:11434" --logLevel info >/dev/null
+fi
 sleep 2; docker ps --filter name=lbt-chat-mcp --format '{{.Names}} {{.Status}}'
 echo "MCP URL: http://127.0.0.1:8940/mcp   (chat page: http://127.0.0.1:11434)"

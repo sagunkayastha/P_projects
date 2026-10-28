@@ -5,12 +5,19 @@ chrome-devtools-mcp. Set up 2026-10-28.
 
 ## On / off
 
+Part of `llm-up` / `llm-down` since 2026-10-28:
+
 ```bash
-llm-up                                                  # router (if it is off)
-~/Others/P_projects/local-browser-test/bin/chat-mcp-up.sh     # 2 windows + browser tool
-~/Others/P_projects/local-browser-test/bin/chat-mcp-down.sh   # closes both windows, stops the tool
-llm-down                                                # when done with the model
+llm-up      # router + browser tool (2 windows), prints the CHAT and BROWSER addresses
+llm-down    # stops the browser tool (closes both windows) and the router
+LLM_NO_BROWSER=1 llm-up                                    # router only, no windows
+~/Others/P_projects/local-browser-test/bin/chat-mcp-up.sh  # browser tool alone (router already up)
+~/Others/P_projects/local-browser-test/bin/chat-mcp-down.sh
 ```
+
+If the browser tool fails to start, `llm-up` still brings the model up and prints one `WARN` line.
+Both addresses are bound to 127.0.0.1: they work on the PC only. Running `llm-up` again keeps a running
+bridge (restarting it would drop the chat page's connection).
 
 `chat-mcp-up.sh` opens two Chrome windows, each with its own throw-away profile in this folder
 (never your own Chrome or logins):
