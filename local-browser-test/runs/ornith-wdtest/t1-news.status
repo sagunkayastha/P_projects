@@ -1,0 +1,5 @@
+watchdog: attempt 2, 10s/120s, step 0, last router request 10s ago, last event 10s ago
+watchdog: attempt 2, 20s/120s, step 0, last router request 20s ago, last event 20s ago
+watchdog: attempt 2, 31s/120s, step 0, last router request 31s ago, last event 31s ago
+watchdog: attempt 2, 41s/120s, step 0, last router request 41s ago, last event 41s ago
+watchdog: STOP (no router request for 40s (step 0))

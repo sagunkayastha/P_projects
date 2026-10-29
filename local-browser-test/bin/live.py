@@ -1,7 +1,14 @@
 # Live view of an opencode --format json run: follows the file and prints thinking, text and tool calls.
 import json, sys, time, textwrap
 f = open(sys.argv[1]); step = 0; t0 = None
+st = open(sys.argv[2]) if len(sys.argv) > 2 else None   # watchdog status file: show its latest line
+last_shown = 0
 while True:
+    if st:
+        for l in st.readlines():
+            l = l.strip()
+            if 'STOP' in l or 'retry' in l: print(f"\033[7m{l}\033[0m", flush=True)
+            elif time.time() - last_shown > 60: print(f"\033[2m{l}\033[0m", flush=True); last_shown = time.time()
     line = f.readline()
     if not line:
         time.sleep(0.3); continue

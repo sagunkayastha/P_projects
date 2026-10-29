@@ -87,3 +87,20 @@ How it is wired:
 
 Cleanup when done with it: `chrome-profile/` (throw-away Chrome profile) and `shots/frames-*` can be deleted;
 image `local-browser-test/cdt-mcp:1.11.0` (1.4 GB) can be removed with `docker rmi`.
+
+## opencode hangs and the watchdog (2026-10-28 evening)
+
+- **Cause of "opencode hangs before the first request":** `opencode run` reads stdin when stdin is not a terminal.
+  Started from a script or agent shell, stdin is often a pipe/socket that never closes, so it waits forever before
+  creating the session (0 of 14 tiny runs worked). Not the database, the MCP server, the router or plugins; the HTTP
+  server mode hangs the same way. **Fix:** always `opencode run ... < /dev/null` from scripts (5/5 OK, ~1.2 s each).
+  `bin/run_task.sh` does this now.
+- **Watchdog in `bin/run_task.sh`:** hard limit (`LIMIT`, default 900 s), stall = no router request or no opencode event
+  for `STALL` s (default 180), then kill the run and its MCP container, log the cause in `<task>.summary.txt`, retry once
+  (`RETRY`), then `RESULT: FAILED`. Status line every 10 s in `<task>.status`, shown in the live Konsole.
+  Tested with `FORCE_STALL=1 STALL=40` (stdin = a pipe that never closes): both attempts stopped at ~43 s, retried, FAILED.
+  Caveat: "router request" counts all router traffic, so another client using the model hides a stall from that check
+  (the "no event" check still catches it).
+- opencode 2.x ignores both plugins (lean-local, i-have-adhd): 2.x plugins are directories whose default export is
+  `{id, setup|effect}`, and the 1.x hook names (`experimental.chat.system.transform`, `tool.definition`) no longer exist.
+  Local prompts are ~10.8k tokens instead of ~3.7k. Porting lean-local needs the new (undocumented) plugin API.

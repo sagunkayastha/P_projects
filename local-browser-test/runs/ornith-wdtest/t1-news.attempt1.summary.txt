@@ -1,0 +1,5 @@
+time_s=43 rc=124 steps=0 tool_calls=0 tool_errors=0 tokens_in=0 out=0 think=0 cache_read=0 max_ctx_step=0
+FINAL ANSWER:
+
+ROUTER: requests=0 prompt_tokens_processed=0 prompt_time_s=0.0 gen_tokens=0 full_reprocess=0 checkpoint_restores=0 requests_over_5k_prompt=0 max_prompt_chunk=0
+WATCHDOG: attempt 1: no router request for 40s (step 0)

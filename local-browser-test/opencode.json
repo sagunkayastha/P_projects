@@ -13,6 +13,8 @@
         "--network",
         "host",
         "--label",
+        "lbt-run=1",
+        "--label",
         "local-browser-test=1",
         "-v",
         "/home/sgkayast/Others/P_projects/local-browser-test/shots:/shots",
