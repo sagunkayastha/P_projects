@@ -2,17 +2,19 @@
 # Browser tool for the llama.cpp chat page: visible throw-away Chrome (debug port 9333) +
 # chrome-devtools-mcp behind supergateway at http://127.0.0.1:8940/mcp (CORS only for the chat page).
 set -eu
+# --bridge-only: start only the MCP bridge (no windows). llm-up uses this.
+BRIDGE_ONLY=0; [ "${1:-}" = "--bridge-only" ] && BRIDGE_ONLY=1
 cd "$(dirname "$0")/.."
 PS=$(pgrep -x plasmashell | head -1)
 eval "$(tr '\0' '\n' < /proc/$PS/environ | grep -E '^(DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS|XAUTHORITY)=' | sed 's/^/export /')"
-if ! curl -s -m 2 127.0.0.1:9333/json/version >/dev/null; then
+if [ $BRIDGE_ONLY = 0 ] && ! curl -s -m 2 127.0.0.1:9333/json/version >/dev/null; then
   kstart -- google-chrome-stable --user-data-dir="$PWD/chrome-profile" --remote-debugging-port=9333 \
     --remote-debugging-address=127.0.0.1 --no-first-run --no-default-browser-check --disable-sync \
     --window-size=1280,900 about:blank >/dev/null 2>&1
   for i in $(seq 20); do curl -s -m 1 127.0.0.1:9333/json/version >/dev/null && break; sleep 1; done
 fi
 # chat page window: its own throw-away profile (settings already saved there: MCP server + system prompt)
-if ! curl -s -m 2 127.0.0.1:9334/json/version >/dev/null; then
+if [ $BRIDGE_ONLY = 0 ] && ! curl -s -m 2 127.0.0.1:9334/json/version >/dev/null; then
   kstart -- google-chrome-stable --user-data-dir="$PWD/chat-ui-profile" --remote-debugging-port=9334 \
     --remote-debugging-address=127.0.0.1 --no-first-run --no-default-browser-check --disable-sync \
     --window-size=1100,950 http://127.0.0.1:11434/ >/dev/null 2>&1
