@@ -1,6 +1,6 @@
 // stdio MCP filter: runs the given MCP server command and cuts long tool-result text so a whole-page
 // snapshot cannot overflow the chat model's context (the llama.cpp chat page sends tool output uncut).
-// Usage: node trim.mjs <server command...>   (TRIM_CHARS, default 16000)
+// Usage: node trim.mjs <server command...>   (TRIM_CHARS, default 16000; chat-mcp-up.sh sets 5000)
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 const MAX = +(process.env.TRIM_CHARS || 16000);

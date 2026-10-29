@@ -11,5 +11,12 @@ if (cmd === 'eval') { const r = await call('Runtime.evaluate', { expression: arg
 if (cmd === 'shot') { const r = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(arg, Buffer.from(r.result.data, 'base64')); console.log('saved', arg); }
 if (cmd === 'type') { await call('Input.insertText', { text: arg }); console.log('typed'); }
 if (cmd === 'key') { for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', { type, key: arg, code: arg, windowsVirtualKeyCode: arg === 'Enter' ? 13 : 0, text: type === 'keyDown' && arg === 'Enter' ? '\r' : undefined }); console.log('key', arg); }
+if (cmd === 'hover' || cmd === 'click') {  // real mouse on the element matching CSS selector arg
+  const r = await call('Runtime.evaluate', { expression: `(()=>{const e=document.querySelector(${JSON.stringify(arg)}); if(!e) return null; e.scrollIntoView({block:'center'}); const b=e.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height/2]})()`, returnByValue: true });
+  const xy = r.result?.result?.value; if (!xy) { console.log('not found', arg); process.exit(1); }
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: xy[0], y: xy[1] });
+  if (cmd === 'click') for (const type of ['mousePressed', 'mouseReleased']) await call('Input.dispatchMouseEvent', { type, x: xy[0], y: xy[1], button: 'left', clickCount: 1 });
+  console.log(cmd, arg, xy.map(Math.round).join(','));
+}
 if (cmd === 'nav') { await call('Page.navigate', { url: arg }); console.log('nav', arg); }
 process.exit(0);

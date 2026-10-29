@@ -20,7 +20,7 @@ fi
 # keep a running bridge (restarting it drops the chat page's MCP session)
 if [ "$(docker inspect -f '{{.State.Running}}' lbt-chat-mcp 2>/dev/null)" != true ]; then
 docker rm -f lbt-chat-mcp >/dev/null 2>&1 || true
-docker run -d --name lbt-chat-mcp --network host --user 1000:1000 --label local-browser-test=1 \
+docker run -d --name lbt-chat-mcp --network host --user 1000:1000 --label local-browser-test=1 -e TRIM_CHARS=5000 \
   -v "$PWD/docker/trim.mjs:/trim.mjs:ro" --entrypoint supergateway local-browser-test/cdt-mcp:1.11.0 \
   --stdio "node /trim.mjs chrome-devtools-mcp --browserUrl http://127.0.0.1:9333 --usageStatistics=false --categoryPerformance=false --categoryNetwork=false --categoryEmulation=false --categoryMemory=false" \
   --outputTransport streamableHttp --stateful --host 127.0.0.1 --port 8940 \

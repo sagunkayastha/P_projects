@@ -1,0 +1,7 @@
+[01:21:03 +0s] helper started: stall 180s, max turn-limit continues 4, max rounds 15
+[01:21:07 +4s] context 95% used >= 70%: stopping the run to compact (forced 1)
+[01:21:11 +7s] compacting (context 83% used)
+[01:22:19 +76s] compaction done
+[01:22:19 +76s] sent "continue (the conversation was compacted: trust the NOTE lines, do not redo DONE items)"
+[01:22:23 +80s] context 83% used >= 70%: stopping the run to compact (forced 2)
+[01:22:26 +83s] compacting (context 2% used)

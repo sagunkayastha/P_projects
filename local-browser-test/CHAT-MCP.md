@@ -61,3 +61,45 @@ article, answered 856,767 (2021 census) + metro "Approximately 4 million", URL
 https://en.wikipedia.org/wiki/Kathmandu. Correct (checked against the article source). 69 s.
 
 Recording is off. For a video, use the frame recorder in `bin/run_task.sh` (`docker/record.mjs`).
+
+## Long tasks (2026-10-28, llama.cpp b11960)
+
+The chat page can now compact a conversation ("Compact conversation" in the context gauge popup, only while the
+model is idle and once there are more steps than "preserved steps"). For long jobs (10+ items, 60-150 steps):
+
+```bash
+~/Others/P_projects/local-browser-test/bin/chat-helper-up.sh     # start BEFORE giving the task
+~/Others/P_projects/local-browser-test/bin/chat-helper-down.sh   # stop (it also stops by itself at the end)
+tail -f ~/Others/P_projects/local-browser-test/runs/chat-helper.log
+```
+
+What the helper does (`docker/chat-helper.mjs`, Node in Docker, drives the chat window over CDP port 9334):
+- The system prompt makes the model work item by item and stop every 3 items with a **PROGRESS REPORT**.
+- When the model stops after a PROGRESS REPORT: hover the context gauge, click **Compact conversation**, wait,
+  then send `continue`.
+- "Agentic turn limit reached. Continue?" -> clicks Continue, at most `MAX_TURN_CONTINUES` (4) times = ~300 turns.
+- Context guard: while the model runs, if the gauge shows >= `MAX_USED` (70%) it presses Stop, compacts and sends
+  `continue` (the model often uses up the context before its 3-item checkpoint).
+- Model stopped mid-task (no PROGRESS REPORT, no final table): sends a `continue` nudge, at most `MAX_NUDGES` (5).
+- Ends on the final answer (model idle, last message has a table), on an error dialog, at `MAX_ROUNDS` (15), or after two
+  stalls (page unchanged for `STALL_S`=180 s while running: presses Stop, sends `continue` once).
+- Env overrides: `STALL_S=… MAX_TURN_CONTINUES=… MAX_ROUNDS=… bin/chat-helper-up.sh`.
+
+Settings (router defaults from `~/Others/Gemma/llamacpp/ui-config.json` via `--ui-config-file`, made by
+`bin/mkuicfg.py`): system prompt (item list, NOTE lines, PROGRESS REPORT every 3 items, read-only rules),
+agenticMaxTurns 60, excludeReasoningFromContext on, browser MCP server preset (http://127.0.0.1:8940/mcp).
+A browser takes them on its first visit or Settings > Reset to default. **compactionPrompt and
+compactionPreservedSteps (2) are not taken from the server by this build**: set them once by hand in Settings
+(text in `ui-config.json`); the chat window profile already has them.
+Bridge: tool output cut at 5,000 characters (`TRIM_CHARS` in `chat-mcp-up.sh`), 24 tools.
+
+### Test 2026-10-28: "find 10 independent headphone review sites and each site's top pick" (ornith, chat page)
+
+PASS: 10/10 sites with page URL and top pick; spot-check 3/3 right (The Verge: Sony WH-1000XM5 best overall,
+CNET: Sony WH-1000XM6, Tom's Guide: Bose QC Ultra Gen 2). One item first pointed at a made-up domain
+("vergenguide.com"), failed in the browser, and was replaced. Small slip: its summary says "5 sites" for 6.
+- Time 35.8 min; 224 model calls; 107k generated tokens; prompt reading 272 s; 3 full re-processes.
+- Helper: 5 compactions (3 at PROGRESS REPORTs, 2 forced by the context guard at 95% / 83%), 2 turn-limit Continues,
+  2 nudges, 1 stall (Stop + continue). The helper was restarted twice during the run to add the context guard and
+  the nudge fix, which are now in place. Without the guard the context reached 95% before the 3rd checkpoint.
+- Log: runs/long-task-run2.helper.log, page text runs/long-task-run2.txt.
