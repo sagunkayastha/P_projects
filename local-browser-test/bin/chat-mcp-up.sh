@@ -26,7 +26,7 @@ docker run -d --name lbt-chat-mcp --network host --user 1000:1000 --label local-
   -v "$PWD/docker/trim.mjs:/trim.mjs:ro" --entrypoint supergateway local-browser-test/cdt-mcp:1.11.0 \
   --stdio "node /trim.mjs chrome-devtools-mcp --browserUrl http://127.0.0.1:9333 --usageStatistics=false --categoryPerformance=false --categoryNetwork=false --categoryEmulation=false --categoryMemory=false" \
   --outputTransport streamableHttp --stateful --host 127.0.0.1 --port 8940 \
-  --cors "http://127.0.0.1:11434" "http://localhost:11434" --logLevel info >/dev/null
+  --cors "http://127.0.0.1:11434" "http://localhost:11434" "http://127.0.0.1:11435" --logLevel info >/dev/null
 fi
 sleep 2; docker ps --filter name=lbt-chat-mcp --format '{{.Names}} {{.Status}}'
 echo "MCP URL: http://127.0.0.1:8940/mcp   (chat page: http://127.0.0.1:11434)"
