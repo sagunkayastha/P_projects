@@ -10,7 +10,7 @@ services:
     ports:
       - "127.0.0.1:8288:8188"
     volumes:
-      - ./models:/app/ComfyUI/models
+      - /mnt/data/comfy-manga/models:/app/ComfyUI/models
       - ./output:/app/ComfyUI/output
       - ./input:/app/ComfyUI/input
       - manga_out:/app/ComfyUI/output/manga   # RAM-backed results, shared with the app

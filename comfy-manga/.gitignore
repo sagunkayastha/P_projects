@@ -1,5 +1,5 @@
 # data, never commit
-models/
+models
 output/
 input/
 __pycache__/
